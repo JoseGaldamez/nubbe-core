@@ -4,7 +4,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/JoseGaldamez/nubbe-core/internal/handlers"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,6 +19,16 @@ func main() {
 
 	router := gin.Default()
 
+	// 1. Configuración de CORS
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173", "https://app.nubbe.run"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	// Ruta de Health Check (esencial para que GCP sepa que tu contenedor está vivo)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "operational", "system": "nubbe-core"})
@@ -26,7 +39,7 @@ func main() {
 	{
 		// Aquí irán las rutas protegidas, ej:
 		// api.Use(auth.FirebaseMiddleware())
-		api.POST("/projects/initialize", handleInitializeProject)
+		api.POST("/projects/initialize", handlers.HandleCreateProject)
 	}
 
 	// Grupo de rutas para Webhooks externos (llamadas desde GitHub)
@@ -49,10 +62,6 @@ func main() {
 }
 
 // Stubs temporales para las funciones de los handlers
-func handleInitializeProject(c *gin.Context) {
-	c.JSON(http.StatusAccepted, gin.H{"message": "Project initialization queued"})
-}
-
 func handleGitHubWebhook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Webhook received"})
 }
