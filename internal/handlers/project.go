@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/api/cloudbuild/v1"
 )
 
 // CreateProjectRequest defines the structure for the incoming project creation payload.
@@ -15,7 +19,7 @@ type CreateProjectRequest struct {
 	SubDomain   string `json:"sub_domine" binding:"required"`
 }
 
-// HandleCreateProject handles the project creation request and returns a mock GCP payload.
+// HandleCreateProject handles the project creation request and submits a build to Cloud Build.
 func HandleCreateProject(c *gin.Context) {
 	var req CreateProjectRequest
 
@@ -28,61 +32,92 @@ func HandleCreateProject(c *gin.Context) {
 		return
 	}
 
-	var mockGCPPayload gin.H
-	// Migrated from GCR to Artifact Registry
-	imageName := "us-central1-docker.pkg.dev/nubbe-prod/nubbe-repo/" + req.SubDomain
-	region := "us-central1"
-
-	// Mock logic based on project type
-	switch req.ProjectType {
-	case "static":
-		// Dynamic Injection: Using Nginx to serve static files
-		mockGCPPayload = gin.H{
-			"service_name": req.SubDomain,
-			"region":       region,
-			"image":        imageName,
-			"build_steps": []gin.H{
-				{
-					"name": "gcr.io/cloud-builders/docker",
-					"args": []string{"build", "-t", imageName, ".", "--build-arg", "ENTRY_POINT=" + req.EntryPoint},
-				},
-				{
-					"name": "gcr.io/cloud-builders/gcloud",
-					"args": []string{"run", "deploy", req.SubDomain, "--image", imageName, "--platform", "managed", "--region", region, "--allow-unauthenticated"},
-				},
-			},
-			"dynamic_injection": gin.H{
-				"dockerfile":  "FROM nginx:alpine\nCOPY . /usr/share/nginx/html/\nEXPOSE 80",
-				"description": "Nginx container with all content injected at build time",
-			},
-		}
-	case "react", "node":
-		// Cloud Native Buildpacks logic
-		mockGCPPayload = gin.H{
-			"service_name": req.SubDomain,
-			"region":       region,
-			"image":        imageName,
-			"build_type":   "Cloud Native Buildpacks",
-			"builder":      "gcr.io/buildpacks/builder:v1",
-			"build_steps": []gin.H{
-				{
-					"name": "gcr.io/k8s-skaffold/pack",
-					"args": []string{"build", imageName, "--builder", "gcr.io/buildpacks/builder:v1", "--publish"},
-				},
-				{
-					"name": "gcr.io/cloud-builders/gcloud",
-					"args": []string{"run", "deploy", req.SubDomain, "--image", imageName, "--platform", "managed", "--region", region, "--allow-unauthenticated"},
-				},
-			},
-		}
-	default:
-		// This should be caught by validation, but added for safety
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported project type"})
+	projectID := os.Getenv("GCP_PROJECT_ID")
+	if projectID == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "GCP_PROJECT_ID environment variable is not set",
+		})
 		return
 	}
 
+	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, req.SubDomain)
+
+	// Create a dynamic Dockerfile string based on the framework
+	var dynamicDockerfile string
+	switch req.ProjectType {
+	case "static":
+		dynamicDockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html/\nEXPOSE 80\nCMD [\"nginx\", \"-g\", \"daemon off;\"]"
+	case "react":
+		dynamicDockerfile = "FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nRUN npm install -g serve\nEXPOSE 3000\nCMD [\"serve\", \"-s\", \"build\", \"-l\", \"3000\"]"
+	case "node":
+		dynamicDockerfile = "FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install\nEXPOSE 8080\nCMD [\"npm\", \"start\"]"
+	default:
+		dynamicDockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html/\nEXPOSE 80"
+	}
+
+	buildObj := &cloudbuild.Build{
+		Steps: []*cloudbuild.BuildStep{
+			{
+				Name: "ubuntu",
+				Args: []string{"bash", "-c", fmt.Sprintf("echo '%s' > Dockerfile", dynamicDockerfile)},
+			},
+			{
+				Name: "ubuntu",
+				Args: []string{"bash", "-c", "echo '<h1>Deploying from Nubbe PaaS!</h1>' > index.html"},
+			},
+			{
+				Name: "gcr.io/cloud-builders/docker",
+				Args: []string{"build", "-t", imageURL, "."},
+			},
+			{
+				Name: "gcr.io/cloud-builders/docker",
+				Args: []string{"push", imageURL},
+			},
+			{
+				Name: "gcr.io/cloud-builders/gcloud",
+				Args: []string{"run", "deploy", req.SubDomain, "--image", imageURL, "--platform", "managed", "--region", "us-central1", "--allow-unauthenticated", "--port", "80"},
+			},
+		},
+	}
+
+	cbService, err := cloudbuild.NewService(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to initialize Cloud Build service",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	resp, err := cbService.Projects.Builds.Create(projectID, buildObj).Do()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to submit build",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	var buildMeta cloudbuild.BuildOperationMetadata
+	if err := json.Unmarshal(resp.Metadata, &buildMeta); err != nil {
+		// Fallback in case metadata parsing fails
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "Deployment started successfully",
+			"operation_id": resp.Name,
+		})
+		return
+	}
+
+	var buildID, buildStatus string
+	if buildMeta.Build != nil {
+		buildID = buildMeta.Build.Id
+		buildStatus = buildMeta.Build.Status
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":          "Mock deployment triggered successfully",
-		"mock_gcp_payload": mockGCPPayload,
+		"message":      "Deployment started successfully",
+		"build_id":     buildID,
+		"build_status": buildStatus,
+		"operation_id": resp.Name,
 	})
 }
