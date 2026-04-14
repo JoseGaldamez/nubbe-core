@@ -69,6 +69,9 @@ func HandleCreateProject(c *gin.Context) {
 			"_PROJECT_ID": req.SubDomain,
 			"_USER_ID":    userID,
 		},
+		Options: &cloudbuild.BuildOptions{
+			SubstitutionOption: "ALLOW_LOOSE",
+		},
 		Steps: []*cloudbuild.BuildStep{
 			{
 				Name: "ubuntu",
