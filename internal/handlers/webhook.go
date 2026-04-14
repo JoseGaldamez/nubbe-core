@@ -40,6 +40,22 @@ func HandleGitHubWebhook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Webhook received"})
 }
 
+// getFriendlyMessage mapea el estado de Cloud Build a un mensaje amigable para el usuario.
+func getFriendlyMessage(status string) string {
+	switch status {
+	case "QUEUED":
+		return "Preparando entorno de compilación..."
+	case "WORKING":
+		return "Compilando código y generando imagen..."
+	case "SUCCESS":
+		return "Imagen generada y desplegada en Cloud Run."
+	case "FAILURE", "INTERNAL_ERROR", "TIMEOUT":
+		return "Error en la compilación. Revisa el log adjunto."
+	default:
+		return "Estado del build actualizado: " + status
+	}
+}
+
 // HandleCloudBuildWebhook procesa las notificaciones de estado de Cloud Build.
 func HandleCloudBuildWebhook(c *gin.Context) {
 	var psMsg PubSubMessage
@@ -68,6 +84,7 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 	// Extraer información requerida
 	buildID := build.Id
 	status := build.Status
+	logURL := build.LogUrl
 
 	// Extraer projectId directamente del objeto Cloud Build (Substitutions)
 	projectId, ok := build.Substitutions["_PROJECT_ID"]
@@ -77,10 +94,18 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Procesando Build: %s, Status: %s, ProjectId: %s", buildID, status, projectId)
+	// Extraer userId directamente del objeto Cloud Build (Substitutions)
+	userID, ok := build.Substitutions["_USER_ID"]
+	if !ok {
+		log.Println("Substitución _USER_ID no encontrada en el objeto Cloud Build, ignorando...")
+		c.JSON(http.StatusOK, gin.H{"message": "_USER_ID missing in substitutions, ignoring"})
+		return
+	}
 
-	// Actualizar Firestore
-	if err := updateProjectStatus(c.Request.Context(), projectId, status); err != nil {
+	log.Printf("Procesando Build: %s, Status: %s, ProjectId: %s, UserId: %s", buildID, status, projectId, userID)
+
+	// Actualizar Firestore (incluyendo sub-colección de builds e historial)
+	if err := updateProjectStatus(c.Request.Context(), userID, projectId, buildID, status, logURL); err != nil {
 		log.Printf("Error actualizando Firestore: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
 		return
@@ -89,17 +114,36 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
-// updateProjectStatus actualiza el documento del proyecto en Firestore.
-func updateProjectStatus(ctx context.Context, projectID string, status string) error {
+// updateProjectStatus actualiza el historial y estado de un build en la sub-colección del proyecto.
+func updateProjectStatus(ctx context.Context, userID, projectID, buildID, status, logURL string) error {
 	if fsClient == nil {
 		return fmt.Errorf("firestore client no inicializado")
 	}
 
-	// Asumiendo que la colección se llama "projects" y el ID del documento es el projectID enviado
-	_, err := fsClient.Collection("projects").Doc(projectID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: status},
-		{Path: "updatedAt", Value: time.Now()},
-	})
+	now := time.Now()
+	friendlyMsg := getFriendlyMessage(status)
+
+	// Crear entrada de historial para ArrayUnion
+	historyEntry := map[string]interface{}{
+		"status":    status,
+		"message":   friendlyMsg,
+		"timestamp": now,
+	}
+
+	// Referencia al documento del build dentro de la ruta jerárquica:
+	// users/{userId}/projects/{projectID}/builds/{buildID}
+	buildRef := fsClient.Collection("users").Doc(userID).
+		Collection("projects").Doc(projectID).
+		Collection("builds").Doc(buildID)
+
+	// Usamos Set con MergeAll para crear el documento si no existe o actualizar campos específicos
+	_, err := buildRef.Set(ctx, map[string]interface{}{
+		"buildId":   buildID,
+		"status":    status,
+		"logUrl":    logURL,
+		"updatedAt": now,
+		"history":   firestore.ArrayUnion(historyEntry),
+	}, firestore.MergeAll)
 
 	return err
 }

@@ -40,6 +40,15 @@ func HandleCreateProject(c *gin.Context) {
 		return
 	}
 
+	// Obtener el ID del usuario desde el contexto (inyectado por el middleware de Firebase)
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "User ID not found in context",
+		})
+		return
+	}
+
 	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, req.SubDomain)
 
 	// Create a dynamic Dockerfile string based on the framework
@@ -56,6 +65,10 @@ func HandleCreateProject(c *gin.Context) {
 	}
 
 	buildObj := &cloudbuild.Build{
+		Substitutions: map[string]string{
+			"_PROJECT_ID": req.SubDomain,
+			"_USER_ID":    userID,
+		},
 		Steps: []*cloudbuild.BuildStep{
 			{
 				Name: "ubuntu",
