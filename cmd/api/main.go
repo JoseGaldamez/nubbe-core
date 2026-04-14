@@ -17,13 +17,35 @@ import (
 
 func main() {
 
-	// -------------------------------------------------- Load .env Account Service -------------------------------------------------------------
+	// -------------------------------------------------- Load Environment Variables -------------------------------------------------------------
 
-	// Error ignorado intencionalmente para evitar que falle en producción
-	_ = godotenv.Load()
+	// Intentar cargar .env. Si falla, solo logueamos (útil para producción en Cloud Run)
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment variables")
+	}
+
+	// Validación estricta de variables de entorno requeridas
+	requiredVars := []string{
+		"GCP_PROJECT_ID",
+		"WEBHOOK_AUDIENCE",
+		"PUBSUB_SERVICE_ACCOUNT_EMAIL",
+	}
+
+	for _, v := range requiredVars {
+		if os.Getenv(v) == "" {
+			log.Fatalf("CRITICAL: La variable de entorno %s es obligatoria y no está definida", v)
+		}
+	}
+
+	gcpProjectID := os.Getenv("GCP_PROJECT_ID")
+
+	// Initialize Firestore
+	ctx := context.Background()
+	if err := handlers.InitFirestore(ctx, gcpProjectID); err != nil {
+		log.Fatalf("Error inicializando Firestore: %v", err)
+	}
 
 	// Initialize Firebase
-	ctx := context.Background()
 	app, err := firebase.NewApp(ctx, nil)
 	if err != nil {
 		log.Fatalf("Error inicializando Firebase: %v", err)
@@ -77,6 +99,11 @@ func main() {
 	webhooks := router.Group("/webhooks")
 	{
 		webhooks.POST("/github", handlers.HandleGitHubWebhook)
+
+		// Webhook de Cloud Build (vía Pub/Sub) con seguridad OIDC
+		audience := os.Getenv("WEBHOOK_AUDIENCE")
+		saEmail := os.Getenv("PUBSUB_SERVICE_ACCOUNT_EMAIL")
+		webhooks.POST("/cloudbuild", middleware.GoogleOIDCMiddleware(audience, saEmail), handlers.HandleCloudBuildWebhook)
 	}
 
 	// ---------------------------------------------------- Run Server ---------------------------------------------------------------------------
