@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"cloud.google.com/go/storage"
+	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
 )
@@ -26,13 +27,13 @@ func GetBuildLogs(c *gin.Context) {
 		bucketName = "nubbe-build-logs" // Fallback por si no está en env
 	}
 
-	if storageClient == nil {
+	if StorageClient == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage client not initialized"})
 		return
 	}
 
 	objectName := fmt.Sprintf("log-%s.txt", buildID)
-	rc, err := storageClient.Bucket(bucketName).Object(objectName).NewReader(c.Request.Context())
+	rc, err := StorageClient.Bucket(bucketName).Object(objectName).NewReader(c.Request.Context())
 	if err != nil {
 		if err == storage.ErrObjectNotExist {
 			// Manejo de error amigable solicitado
@@ -57,7 +58,7 @@ func GetBuildLogs(c *gin.Context) {
 
 // CreateProjectRequest defines the structure for the incoming project creation payload.
 type CreateProjectRequest struct {
-	ProjectType string `json:"project_type" binding:"required,oneof=static react node"`
+	ProjectType string `json:"project_type" binding:"required,oneof=static react node astro go"`
 	EntryPoint  string `json:"entry_point" binding:"required"`
 	RepoName    string `json:"repo_name" binding:"required"`
 	Title       string `json:"title" binding:"required"`
@@ -94,38 +95,61 @@ func HandleCreateProject(c *gin.Context) {
 		return
 	}
 
-	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, req.SubDomain)
-
-	// Create a dynamic Dockerfile string based on the framework
-	var dynamicDockerfile string
-	switch req.ProjectType {
-	case "static":
-		dynamicDockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html/\nEXPOSE 80\nCMD [\"nginx\", \"-g\", \"daemon off;\"]"
-	case "react":
-		dynamicDockerfile = "FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nRUN npm install -g serve\nEXPOSE 3000\nCMD [\"serve\", \"-s\", \"build\", \"-l\", \"3000\"]"
-	case "node":
-		dynamicDockerfile = "FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install\nEXPOSE 8080\nCMD [\"npm\", \"start\"]"
-	default:
-		dynamicDockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html/\nEXPOSE 80"
+	// 1. Fetch GitHub Token from Firestore
+	if FsClient == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Firestore client not initialized"})
+		return
 	}
+
+	dsnap, err := FsClient.Collection("users").Doc(userID).Get(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user data", "details": err.Error()})
+		return
+	}
+
+	var userData struct {
+		GithubAccessToken string `firestore:"githubAccessToken"`
+	}
+	if err := dsnap.DataTo(&userData); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse user data", "details": err.Error()})
+		return
+	}
+
+	if userData.GithubAccessToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "GitHub Access Token not found for user"})
+		return
+	}
+
+	// 2. Get Builder Strategy
+	builder, err := builders.GetBuilder(req.ProjectType)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	dynamicDockerfile := builder.GetDockerfile()
+
+	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, req.SubDomain)
 
 	buildObj := &cloudbuild.Build{
 		LogsBucket: "gs://nubbe-build-logs",
 		Substitutions: map[string]string{
-			"_PROJECT_ID": req.SubDomain,
-			"_USER_ID":    userID,
+			"_PROJECT_ID":    req.SubDomain,
+			"_USER_ID":       userID,
+			"_GITHUB_TOKEN":  userData.GithubAccessToken,
+			"_REPO_NAME":    req.RepoName,
 		},
 		Options: &cloudbuild.BuildOptions{
 			SubstitutionOption: "ALLOW_LOOSE",
 		},
 		Steps: []*cloudbuild.BuildStep{
 			{
-				Name: "ubuntu",
-				Args: []string{"bash", "-c", fmt.Sprintf("echo '%s' > Dockerfile", dynamicDockerfile)},
+				Name:       "gcr.io/cloud-builders/git",
+				Entrypoint: "bash",
+				Args:       []string{"-c", "git clone https://x-access-token:$_GITHUB_TOKEN@github.com/$_REPO_NAME.git ."},
 			},
 			{
 				Name: "ubuntu",
-				Args: []string{"bash", "-c", "echo '<h1>Deploying from Nubbe PaaS!</h1>' > index.html"},
+				Args: []string{"bash", "-c", fmt.Sprintf("echo '%s' > Dockerfile", dynamicDockerfile)},
 			},
 			{
 				Name: "gcr.io/cloud-builders/docker",

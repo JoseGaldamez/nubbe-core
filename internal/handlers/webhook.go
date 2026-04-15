@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	fsClient      *firestore.Client
-	storageClient *storage.Client
+	FsClient      *firestore.Client
+	StorageClient *storage.Client
 )
 
 // InitFirestore inicializa el cliente global de Firestore.
@@ -26,7 +26,7 @@ func InitFirestore(ctx context.Context, gcpProjectID string) error {
 	if err != nil {
 		return fmt.Errorf("error al crear el cliente de Firestore: %w", err)
 	}
-	fsClient = client
+	FsClient = client
 	return nil
 }
 
@@ -36,7 +36,7 @@ func InitStorage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error al crear el cliente de Storage: %w", err)
 	}
-	storageClient = client
+	StorageClient = client
 	return nil
 }
 
@@ -130,7 +130,7 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 
 // updateProjectStatus actualiza el historial y estado de un build en la sub-colección del proyecto.
 func updateProjectStatus(ctx context.Context, userID, projectID, buildID, status, logURL string) error {
-	if fsClient == nil {
+	if FsClient == nil {
 		return fmt.Errorf("firestore client no inicializado")
 	}
 
@@ -146,7 +146,7 @@ func updateProjectStatus(ctx context.Context, userID, projectID, buildID, status
 
 	// Referencia al documento del build dentro de la ruta jerárquica:
 	// users/{userId}/projects/{projectID}/builds/{buildID}
-	buildRef := fsClient.Collection("users").Doc(userID).
+	buildRef := FsClient.Collection("users").Doc(userID).
 		Collection("projects").Doc(projectID).
 		Collection("builds").Doc(buildID)
 
