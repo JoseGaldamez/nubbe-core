@@ -78,22 +78,22 @@ func HandleCreateProject(c *gin.Context) {
 		return
 	}
 
-	// 2. Save Project to Firestore
-	projectData := map[string]interface{}{
-		"project_type": req.ProjectType,
-		"entry_point":  req.EntryPoint,
-		"repo_name":    req.RepoName,
-		"title":        req.Title,
-		"sub_domine":   req.SubDomain,
-		"branch":       req.Branch,
-		"createdAt":    os.Getenv("TIMESTAMP"), // Use real timestamp if available
-	}
+	// // 2. Save Project to Firestore
+	// projectData := map[string]interface{}{
+	// 	"project_type": req.ProjectType,
+	// 	"entry_point":  req.EntryPoint,
+	// 	"repo_name":    req.RepoName,
+	// 	"title":        req.Title,
+	// 	"sub_domine":   req.SubDomain,
+	// 	"branch":       req.Branch,
+	// 	"createdAt":    time.Now().Format(time.RFC3339), // Use real timestamp if available
+	// }
 
-	_, err = FsClient.Collection("users").Doc(userID).Collection("projects").Doc(req.SubDomain).Set(c.Request.Context(), projectData)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save project data", "details": err.Error()})
-		return
-	}
+	// _, err = FsClient.Collection("users").Doc(userID).Collection("projects").Doc(req.SubDomain).Set(c.Request.Context(), projectData)
+	// if err != nil {
+	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save project data", "details": err.Error()})
+	// 	return
+	// }
 
 	// 3. Register GitHub Webhook
 	err = RegisterGitHubWebhook(userID, req.SubDomain, req.RepoName, userData.GithubAccessToken)
