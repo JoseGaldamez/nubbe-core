@@ -1,60 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 
-	"cloud.google.com/go/storage"
 	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
 )
-
-// GetBuildLogs actúa como un proxy para leer los logs de Cloud Build desde GCS.
-func GetBuildLogs(c *gin.Context) {
-	buildID := c.Param("buildId")
-	if buildID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "buildId is required"})
-		return
-	}
-
-	bucketName := os.Getenv("LOGS_BUCKET")
-	if bucketName == "" {
-		bucketName = "nubbe-build-logs" // Fallback por si no está en env
-	}
-
-	if StorageClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage client not initialized"})
-		return
-	}
-
-	objectName := fmt.Sprintf("log-%s.txt", buildID)
-	rc, err := StorageClient.Bucket(bucketName).Object(objectName).NewReader(c.Request.Context())
-	if err != nil {
-		if err == storage.ErrObjectNotExist {
-			// Manejo de error amigable solicitado
-			c.String(http.StatusOK, "Iniciando entorno de compilación. Esperando logs...")
-			return
-		}
-		log.Printf("Error leyendo log de GCS: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read logs from storage"})
-		return
-	}
-	defer rc.Close()
-
-	content, err := io.ReadAll(rc)
-	if err != nil {
-		log.Printf("Error leyendo contenido del log: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process log content"})
-		return
-	}
-
-	c.String(http.StatusOK, string(content))
-}
 
 // CreateProjectRequest defines the structure for the incoming project creation payload.
 type CreateProjectRequest struct {
@@ -63,6 +20,7 @@ type CreateProjectRequest struct {
 	RepoName    string `json:"repo_name" binding:"required"`
 	Title       string `json:"title" binding:"required"`
 	SubDomain   string `json:"sub_domine" binding:"required"`
+	Branch      string `json:"branch" binding:"required"`
 }
 
 // HandleCreateProject handles the project creation request and submits a build to Cloud Build.
@@ -120,23 +78,64 @@ func HandleCreateProject(c *gin.Context) {
 		return
 	}
 
-	// 2. Get Builder Strategy
-	builder, err := builders.GetBuilder(req.ProjectType)
+	// 2. Save Project to Firestore
+	projectData := map[string]interface{}{
+		"project_type": req.ProjectType,
+		"entry_point":  req.EntryPoint,
+		"repo_name":    req.RepoName,
+		"title":        req.Title,
+		"sub_domine":   req.SubDomain,
+		"branch":       req.Branch,
+		"createdAt":    os.Getenv("TIMESTAMP"), // Use real timestamp if available
+	}
+
+	_, err = FsClient.Collection("users").Doc(userID).Collection("projects").Doc(req.SubDomain).Set(c.Request.Context(), projectData)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save project data", "details": err.Error()})
 		return
+	}
+
+	// 3. Register GitHub Webhook
+	err = RegisterGitHubWebhook(userID, req.SubDomain, req.RepoName, userData.GithubAccessToken)
+	if err != nil {
+		log.Printf("Warning: Failed to register GitHub Webhook: %v", err)
+		// We continue even if webhook fails, but in a real app you might want to handle this better
+	}
+
+	// 4. Trigger Initial Cloud Build
+	buildID, buildStatus, operationName, err := triggerCloudBuild(c.Request.Context(), userID, req.SubDomain, req.RepoName, req.ProjectType, userData.GithubAccessToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to trigger build", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "Project created and deployment started successfully",
+		"build_id":     buildID,
+		"build_status": buildStatus,
+		"operation_id": operationName,
+	})
+}
+
+// triggerCloudBuild starts a Cloud Build process and returns build info.
+func triggerCloudBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken string) (string, string, string, error) {
+	projectID := os.Getenv("GCP_PROJECT_ID")
+
+	builder, err := builders.GetBuilder(projectType)
+	if err != nil {
+		return "", "", "", err
 	}
 	dynamicDockerfile := builder.GetDockerfile()
 
-	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, req.SubDomain)
+	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, subDomain)
 
 	buildObj := &cloudbuild.Build{
 		LogsBucket: "gs://nubbe-build-logs",
 		Substitutions: map[string]string{
-			"_PROJECT_ID":    req.SubDomain,
-			"_USER_ID":       userID,
-			"_GITHUB_TOKEN":  userData.GithubAccessToken,
-			"_REPO_NAME":    req.RepoName,
+			"_PROJECT_ID":   subDomain,
+			"_USER_ID":      userID,
+			"_GITHUB_TOKEN": githubToken,
+			"_REPO_NAME":    repoName,
 		},
 		Options: &cloudbuild.BuildOptions{
 			SubstitutionOption: "ALLOW_LOOSE",
@@ -161,37 +160,24 @@ func HandleCreateProject(c *gin.Context) {
 			},
 			{
 				Name: "gcr.io/cloud-builders/gcloud",
-				Args: []string{"run", "deploy", req.SubDomain, "--image", imageURL, "--platform", "managed", "--region", "us-central1", "--allow-unauthenticated", "--port", "80"},
+				Args: []string{"run", "deploy", subDomain, "--image", imageURL, "--platform", "managed", "--region", "us-central1", "--allow-unauthenticated", "--port", "80"},
 			},
 		},
 	}
 
-	cbService, err := cloudbuild.NewService(c.Request.Context())
+	cbService, err := cloudbuild.NewService(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to initialize Cloud Build service",
-			"details": err.Error(),
-		})
-		return
+		return "", "", "", err
 	}
 
 	resp, err := cbService.Projects.Builds.Create(projectID, buildObj).Do()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to submit build",
-			"details": err.Error(),
-		})
-		return
+		return "", "", "", err
 	}
 
 	var buildMeta cloudbuild.BuildOperationMetadata
 	if err := json.Unmarshal(resp.Metadata, &buildMeta); err != nil {
-		// Fallback in case metadata parsing fails
-		c.JSON(http.StatusOK, gin.H{
-			"message":      "Deployment started successfully",
-			"operation_id": resp.Name,
-		})
-		return
+		return "", "", resp.Name, nil
 	}
 
 	var buildID, buildStatus string
@@ -200,10 +186,5 @@ func HandleCreateProject(c *gin.Context) {
 		buildStatus = buildMeta.Build.Status
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "Deployment started successfully",
-		"build_id":     buildID,
-		"build_status": buildStatus,
-		"operation_id": resp.Name,
-	})
+	return buildID, buildStatus, resp.Name, nil
 }
