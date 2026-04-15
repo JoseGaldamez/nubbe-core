@@ -10,11 +10,15 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/storage"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
 )
 
-var fsClient *firestore.Client
+var (
+	fsClient      *firestore.Client
+	storageClient *storage.Client
+)
 
 // InitFirestore inicializa el cliente global de Firestore.
 func InitFirestore(ctx context.Context, gcpProjectID string) error {
@@ -23,6 +27,16 @@ func InitFirestore(ctx context.Context, gcpProjectID string) error {
 		return fmt.Errorf("error al crear el cliente de Firestore: %w", err)
 	}
 	fsClient = client
+	return nil
+}
+
+// InitStorage inicializa el cliente global de Google Cloud Storage.
+func InitStorage(ctx context.Context) error {
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("error al crear el cliente de Storage: %w", err)
+	}
+	storageClient = client
 	return nil
 }
 

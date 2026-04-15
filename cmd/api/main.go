@@ -45,6 +45,11 @@ func main() {
 		log.Fatalf("Error inicializando Firestore: %v", err)
 	}
 
+	// Initialize Storage
+	if err := handlers.InitStorage(ctx); err != nil {
+		log.Fatalf("Error inicializando Storage: %v", err)
+	}
+
 	// Initialize Firebase
 	app, err := firebase.NewApp(ctx, nil)
 	if err != nil {
@@ -93,6 +98,7 @@ func main() {
 		// Aquí irán las rutas protegidas, ej:
 		// api.Use(auth.FirebaseMiddleware())
 		api.POST("/projects/initialize", handlers.HandleCreateProject)
+		api.GET("/projects/:projectId/builds/:buildId/logs", handlers.GetBuildLogs)
 	}
 
 	// Grupo de rutas para Webhooks externos (llamadas desde GitHub)
