@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
+	"google.golang.org/api/run/v1"
 )
 
 // getFriendlyMessage mapea el estado de Cloud Build a un mensaje amigable para el usuario.
@@ -28,6 +30,33 @@ func getFriendlyMessage(status string) string {
 	default:
 		return "Estado del build actualizado: " + status
 	}
+}
+
+// MapCustomDomain asocia un dominio personalizado a un servicio de Cloud Run.
+func MapCustomDomain(ctx context.Context, gcpProjectID, region, serviceName, domain string) error {
+	runService, err := run.NewService(ctx)
+	if err != nil {
+		return fmt.Errorf("error al crear el servicio de Cloud Run: %v", err)
+	}
+
+	// El formato para el parent en la API v1 es "namespaces/{project-id}"
+	parent := fmt.Sprintf("namespaces/%s", gcpProjectID)
+	mapping := &run.DomainMapping{
+		Metadata: &run.ObjectMeta{
+			Name: domain,
+		},
+		Spec: &run.DomainMappingSpec{
+			RouteName: serviceName,
+		},
+	}
+
+	// Ejecuta la creación del DomainMapping
+	_, err = runService.Namespaces.Domainmappings.Create(parent, mapping).Do()
+	if err != nil {
+		return fmt.Errorf("error al crear el DomainMapping: %v", err)
+	}
+
+	return nil
 }
 
 // HandleCloudBuildWebhook procesa las notificaciones de estado de Cloud Build.
@@ -83,6 +112,25 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 		log.Printf("Error actualizando Firestore: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
 		return
+	}
+
+	// Lógica para SUCCESS: Mapeo de dominio personalizado
+	if status == "SUCCESS" {
+		gcpProject := os.Getenv("GCP_PROJECT_ID")
+		if gcpProject == "" {
+			log.Printf("Error: GCP_PROJECT_ID no configurado en el entorno. No se puede mapear el dominio.")
+		} else {
+			region := "us-central1"
+			domain := fmt.Sprintf("%s.nubbe.run", projectId)
+			log.Printf("Intentando mapear dominio %s a servicio %s", domain, projectId)
+
+			if err := MapCustomDomain(c.Request.Context(), gcpProject, region, projectId, domain); err != nil {
+				// No retornamos error HTTP para evitar reintentos de Pub/Sub si Firestore ya está OK
+				log.Printf("Falla crítica al mapear dominio personalizado: %v", err)
+			} else {
+				log.Printf("Dominio %s mapeado exitosamente.", domain)
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})

@@ -29,7 +29,7 @@ func (b *NodeBuilder) GetDockerfile() string {
 type AstroBuilder struct{}
 
 func (b *AstroBuilder) GetDockerfile() string {
-	return "FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nFROM nginx:alpine\nCOPY --from=0 /app/dist /usr/share/nginx/html\nEXPOSE 80\nCMD [\"nginx\", \"-g\", \"daemon off;\"]"
+	return "FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nFROM nginx:alpine\nCOPY --from=0 /app/dist /usr/share/nginx/html\nEXPOSE 80\nCMD [\"nginx\", \"-g\", \"daemon off;\"]"
 }
 
 type GoBuilder struct{}

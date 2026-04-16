@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ type GitHubPushPayload struct {
 }
 
 // RegisterGitHubWebhook registers a webhook in the specified GitHub repository.
-func RegisterGitHubWebhook(userID, projectID, repoName, token string) error {
+func RegisterGitHubWebhook(ctx context.Context, userID, projectID, repoName, token string) error {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/hooks", repoName)
 	payloadURL := fmt.Sprintf("https://api.nubbe.run/webhooks/github?uid=%s&pid=%s", userID, projectID)
 
@@ -38,7 +39,7 @@ func RegisterGitHubWebhook(userID, projectID, repoName, token string) error {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return err
 	}

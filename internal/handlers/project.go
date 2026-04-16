@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 
+	"time"
+
 	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
@@ -78,29 +80,17 @@ func HandleCreateProject(c *gin.Context) {
 		return
 	}
 
-	// // 2. Save Project to Firestore
-	// projectData := map[string]interface{}{
-	// 	"project_type": req.ProjectType,
-	// 	"entry_point":  req.EntryPoint,
-	// 	"repo_name":    req.RepoName,
-	// 	"title":        req.Title,
-	// 	"sub_domine":   req.SubDomain,
-	// 	"branch":       req.Branch,
-	// 	"createdAt":    time.Now().Format(time.RFC3339), // Use real timestamp if available
-	// }
+	// 3. Register GitHub Webhook Async
+	go func(uID, pID, rName, token string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-	// _, err = FsClient.Collection("users").Doc(userID).Collection("projects").Doc(req.SubDomain).Set(c.Request.Context(), projectData)
-	// if err != nil {
-	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save project data", "details": err.Error()})
-	// 	return
-	// }
-
-	// 3. Register GitHub Webhook
-	err = RegisterGitHubWebhook(userID, req.SubDomain, req.RepoName, userData.GithubAccessToken)
-	if err != nil {
-		log.Printf("Warning: Failed to register GitHub Webhook: %v", err)
-		// We continue even if webhook fails, but in a real app you might want to handle this better
-	}
+		if err := RegisterGitHubWebhook(ctx, uID, pID, rName, token); err != nil {
+			log.Printf("Warning: Failed to register GitHub Webhook for project %s: %v", pID, err)
+		} else {
+			log.Printf("Success: GitHub Webhook registered for project %s", pID)
+		}
+	}(userID, req.SubDomain, req.RepoName, userData.GithubAccessToken)
 
 	// 4. Trigger Initial Cloud Build
 	buildID, buildStatus, operationName, err := triggerCloudBuild(c.Request.Context(), userID, req.SubDomain, req.RepoName, req.ProjectType, userData.GithubAccessToken)
