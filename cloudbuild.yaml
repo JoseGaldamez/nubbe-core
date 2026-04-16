@@ -1,0 +1,21 @@
+steps:
+  # 1. Compilación ultra rápida con caché automático usando Kaniko
+  - name: "gcr.io/kaniko-project/executor:latest"
+    args:
+      - "--destination=us-central1-docker.pkg.dev/$PROJECT_ID/nubbe-repo/nubbe-core:latest"
+      - "--cache=true"
+      - "--cache-ttl=168h" # Retiene el caché por 7 días
+
+  # 2. Despliegue de la imagen generada hacia Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "nubbe-core"
+      - "--image"
+      - "us-central1-docker.pkg.dev/$PROJECT_ID/nubbe-repo/nubbe-core:latest"
+      - "--region"
+      - "us-central1"
+      - "--platform"
+      - "managed"
