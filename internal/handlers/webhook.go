@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
+	"google.golang.org/api/option"
 	"google.golang.org/api/run/v1"
 )
 
@@ -33,30 +34,32 @@ func getFriendlyMessage(status string) string {
 }
 
 // MapCustomDomain asocia un dominio personalizado a un servicio de Cloud Run.
+// ... (asegúrate de tener "google.golang.org/api/option" en los imports) ...
+
 func MapCustomDomain(ctx context.Context, gcpProjectID, region, serviceName, domain string) error {
-	runService, err := run.NewService(ctx)
+	// 1. Redireccionar el cliente a la región exacta (Vital para evitar el 404)
+	regionalEndpoint := "https://" + region + "-run.googleapis.com"
+	runService, err := run.NewService(ctx, option.WithEndpoint(regionalEndpoint))
 	if err != nil {
-		return fmt.Errorf("error al crear el servicio de Cloud Run: %v", err)
+		return err
 	}
 
-	// El formato para el parent en la API v1 es "namespaces/{project-id}"
-	parent := fmt.Sprintf("namespaces/%s", gcpProjectID)
+	// 2. En la API v1 de Cloud Run, el "padre" debe ser el namespace
+	parent := "namespaces/" + gcpProjectID
+
 	mapping := &run.DomainMapping{
 		Metadata: &run.ObjectMeta{
 			Name: domain,
 		},
 		Spec: &run.DomainMappingSpec{
+			// El RouteName debe coincidir con el nombre exacto de la app desplegada
 			RouteName: serviceName,
 		},
 	}
 
-	// Ejecuta la creación del DomainMapping
+	// 3. Ejecutamos la creación usando la ruta Namespaces
 	_, err = runService.Namespaces.Domainmappings.Create(parent, mapping).Do()
-	if err != nil {
-		return fmt.Errorf("error al crear el DomainMapping: %v", err)
-	}
-
-	return nil
+	return err
 }
 
 // HandleCloudBuildWebhook procesa las notificaciones de estado de Cloud Build.
