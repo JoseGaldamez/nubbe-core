@@ -48,11 +48,12 @@ func MapCustomDomain(ctx context.Context, gcpProjectID, region, serviceName, dom
 	parent := "namespaces/" + gcpProjectID
 
 	mapping := &run.DomainMapping{
+		ApiVersion: "domains.cloudrun.com/v1",
+		Kind:       "DomainMapping",
 		Metadata: &run.ObjectMeta{
 			Name: domain,
 		},
 		Spec: &run.DomainMappingSpec{
-			// El RouteName debe coincidir con el nombre exacto de la app desplegada
 			RouteName: serviceName,
 		},
 	}
