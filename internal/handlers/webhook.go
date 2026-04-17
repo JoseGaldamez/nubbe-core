@@ -7,14 +7,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
-	"google.golang.org/api/option"
-	"google.golang.org/api/run/v1"
 )
 
 // getFriendlyMessage mapea el estado de Cloud Build a un mensaje amigable para el usuario.
@@ -31,36 +28,6 @@ func getFriendlyMessage(status string) string {
 	default:
 		return "Estado del build actualizado: " + status
 	}
-}
-
-// MapCustomDomain asocia un dominio personalizado a un servicio de Cloud Run.
-// ... (asegúrate de tener "google.golang.org/api/option" en los imports) ...
-
-func MapCustomDomain(ctx context.Context, gcpProjectID, region, serviceName, domain string) error {
-	// 1. Redireccionar el cliente a la región exacta (Vital para evitar el 404)
-	regionalEndpoint := "https://" + region + "-run.googleapis.com"
-	runService, err := run.NewService(ctx, option.WithEndpoint(regionalEndpoint))
-	if err != nil {
-		return err
-	}
-
-	// 2. En la API v1 de Cloud Run, el "padre" debe ser el namespace
-	parent := "namespaces/" + gcpProjectID
-
-	mapping := &run.DomainMapping{
-		ApiVersion: "domains.cloudrun.com/v1",
-		Kind:       "DomainMapping",
-		Metadata: &run.ObjectMeta{
-			Name: domain,
-		},
-		Spec: &run.DomainMappingSpec{
-			RouteName: serviceName,
-		},
-	}
-
-	// 3. Ejecutamos la creación usando la ruta Namespaces
-	_, err = runService.Namespaces.Domainmappings.Create(parent, mapping).Do()
-	return err
 }
 
 // HandleCloudBuildWebhook procesa las notificaciones de estado de Cloud Build.
@@ -116,25 +83,6 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 		log.Printf("Error actualizando Firestore: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
 		return
-	}
-
-	// Lógica para SUCCESS: Mapeo de dominio personalizado
-	if status == "SUCCESS" {
-		gcpProject := os.Getenv("GCP_PROJECT_ID")
-		if gcpProject == "" {
-			log.Printf("Error: GCP_PROJECT_ID no configurado en el entorno. No se puede mapear el dominio.")
-		} else {
-			region := "us-central1"
-			domain := fmt.Sprintf("%s.nubbe.run", projectId)
-			log.Printf("Intentando mapear dominio %s a servicio %s", domain, projectId)
-
-			if err := MapCustomDomain(c.Request.Context(), gcpProject, region, projectId, domain); err != nil {
-				// No retornamos error HTTP para evitar reintentos de Pub/Sub si Firestore ya está OK
-				log.Printf("Falla crítica al mapear dominio personalizado: %v", err)
-			} else {
-				log.Printf("Dominio %s mapeado exitosamente.", domain)
-			}
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
