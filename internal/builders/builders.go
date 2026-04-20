@@ -29,7 +29,37 @@ func (b *NodeBuilder) GetDockerfile() string {
 type AstroBuilder struct{}
 
 func (b *AstroBuilder) GetDockerfile() string {
-	return "FROM node:22-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nFROM nginx:alpine\nCOPY --from=0 /app/dist /usr/share/nginx/html\nEXPOSE 80\nCMD [\"nginx\", \"-g\", \"daemon off;\"]"
+	return `FROM node:22-alpine AS builder
+WORKDIR /app
+COPY . .
+
+# Autodetección del gestor de paquetes
+RUN if [ -f "pnpm-lock.yaml" ]; then \
+        echo "Usando pnpm..." && \
+        npm install -g pnpm && \
+        pnpm install && \
+        pnpm run build; \
+    elif [ -f "yarn.lock" ]; then \
+        echo "Usando yarn..." && \
+        npm install -g yarn && \
+        yarn install && \
+        yarn run build; \
+    elif [ -f "bun.lockb" ]; then \
+        echo "Usando bun..." && \
+        npm install -g bun && \
+        bun install && \
+        bun run build; \
+    else \
+        echo "Usando npm por defecto..." && \
+        npm install && \
+        npm run build; \
+    fi
+
+# Etapa de producción
+FROM nginx:alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]`
 }
 
 type GoBuilder struct{}
