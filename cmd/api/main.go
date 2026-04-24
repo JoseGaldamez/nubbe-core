@@ -99,6 +99,7 @@ func main() {
 		// api.Use(auth.FirebaseMiddleware())
 		api.POST("/projects/initialize", handlers.HandleCreateProject)
 		api.GET("/projects/:projectId/builds/:buildId/logs", handlers.GetBuildLogs)
+		api.GET("/logs/stream", handlers.StreamLogs)
 	}
 
 	// Grupo de rutas para Webhooks externos (llamadas desde GitHub)
@@ -122,6 +123,7 @@ func main() {
 	}
 
 	log.Printf("Nubbe Core inicializado. Escuchando en el puerto %s", port)
+	go handlers.StartPubSubSubscriber(gcpProjectID)
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Error al iniciar el servidor: %v", err)
 	}
