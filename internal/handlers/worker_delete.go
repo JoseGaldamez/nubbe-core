@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,16 +28,23 @@ type PubSubPushRequest struct {
 func JobWorkerDeleteProject(c *gin.Context) {
 	var pushReq PubSubPushRequest
 	if err := c.ShouldBindJSON(&pushReq); err != nil {
-		// Aquí sí cabe un bad request, porque si el payload base está mal,
-		// no sabemos ni quién es el usuario.
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Payload inválido"})
 		return
 	}
 
+	// Decodificar el Base64 que envía Google Pub/Sub
+	decodedData, err := base64.StdEncoding.DecodeString(pushReq.Message.Data)
+	if err != nil {
+		log.Printf("[Worker] Error decodificando Base64: %v", err)
+		c.Status(http.StatusOK) // ACK para no reintentar un mensaje corrupto
+		return
+	}
+
+	// Decodificar los bytes limpios hacia tu struct de Go
 	var job JobPayload
-	if err := json.Unmarshal([]byte(pushReq.Message.Data), &job); err != nil {
-		log.Printf("[Worker] Error crítico decodificando Data: %v", err)
-		c.Status(http.StatusOK) // ACK para descartar este mensaje corrupto
+	if err := json.Unmarshal(decodedData, &job); err != nil {
+		log.Printf("[Worker] Error crítico decodificando JSON: %v. Payload: %s", err, string(decodedData))
+		c.Status(http.StatusOK)
 		return
 	}
 

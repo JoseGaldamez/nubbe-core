@@ -79,9 +79,10 @@ func DeleteProjectAsync(c *gin.Context) {
 
 	// Publicar asíncronamente
 	result := publisher.Publish(ctx, &pubsub.Message{Data: payload})
+
 	_, errPubSub := result.Get(ctx)
 	if errPubSub != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Fallo al encolar la tarea de destrucción"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Fallo al encolar la tarea de destrucción", "data": errPubSub.Error()})
 		return
 	}
 
