@@ -93,14 +93,25 @@ func main() {
 	api := router.Group("/api/v1")
 
 	// Middleware de Firebase
+	// api.Use(auth.FirebaseMiddleware())
 	api.Use(middleware.FirebaseAuthMiddleware(authClient))
 	{
 		// Aquí irán las rutas protegidas, ej:
-		// api.Use(auth.FirebaseMiddleware())
 		api.POST("/projects/initialize", handlers.HandleCreateProject)
+
+		// Ruta para borrar un proyecto
+		api.DELETE("/projects/:id", handlers.DeleteProjectAsync)
+
+		// Rutas de logs
 		api.GET("/projects/:projectId/builds/:buildId/logs", handlers.GetBuildLogs)
 		api.GET("/logs/stream", handlers.StreamLogs)
 	}
+
+	// --------------------------------------------------------------------------------------------------------------------------------------------------
+
+	saEmail := os.Getenv("PUBSUB_SERVICE_ACCOUNT_EMAIL")
+	audienceCloudBuild := os.Getenv("WEBHOOK_AUDIENCE")
+	audienceJobs := os.Getenv("JOBS_AUDIENCE")
 
 	// Grupo de rutas para Webhooks externos (llamadas desde GitHub)
 	webhooks := router.Group("/webhooks")
@@ -108,9 +119,24 @@ func main() {
 		webhooks.POST("/github", handlers.HandleGitHubWebhook)
 
 		// Webhook de Cloud Build (vía Pub/Sub) con seguridad OIDC
-		audience := os.Getenv("WEBHOOK_AUDIENCE")
-		saEmail := os.Getenv("PUBSUB_SERVICE_ACCOUNT_EMAIL")
-		webhooks.POST("/cloudbuild", middleware.GoogleOIDCMiddleware(audience, saEmail), handlers.HandleCloudBuildWebhook)
+		webhooks.POST("/cloudbuild", middleware.GoogleOIDCMiddleware(audienceCloudBuild, saEmail), handlers.HandleCloudBuildWebhook)
+	}
+
+	// Grupo de rutas para Workers internos (Jobs)
+	internalJobs := router.Group("/api/internal/jobs")
+	{
+		// Creamos un sub-grupo específico para los workers y le aplicamos el middleware a TODO el grupo
+		workers := internalJobs.Group("/worker", middleware.GoogleOIDCMiddleware(audienceJobs, saEmail))
+		{
+			// Esta ruta hereda la protección OIDC automáticamente
+			// Responde a: POST /api/internal/jobs/worker/delete
+			workers.POST("/delete", handlers.JobWorkerDeleteProject)
+
+			// El día de mañana solo agregas líneas aquí:
+			// workers.POST("/email", handlers.EmailWorker)
+			// workers.POST("/report", handlers.ReportWorker)
+		}
+
 	}
 
 	// ---------------------------------------------------- Run Server ---------------------------------------------------------------------------
