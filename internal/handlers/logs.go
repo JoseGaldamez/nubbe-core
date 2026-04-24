@@ -145,12 +145,11 @@ func StreamLogs(c *gin.Context) {
 	r := c.Request
 	ctx := r.Context()
 
-	// 1. Configuración de Headers (Incluyendo el salvavidas para Cloud Run)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("X-Accel-Buffering", "no") // CRÍTICO para que Cloud Run no bloquee el stream
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -158,12 +157,17 @@ func StreamLogs(c *gin.Context) {
 		return
 	}
 
-	// 2. Forzamos el envío de los encabezados al navegador INMEDIATAMENTE
-	// Esto inicializa la conexión en el frontend antes de enviar datos
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
 
-	// 3. Registramos este cliente en el Hub
+	// EL ROMPE-BÚFERES (Padding Hack)
+	padding := make([]byte, 2048)
+	for i := range padding {
+		padding[i] = ' '
+	}
+	fmt.Fprintf(w, ":%s\n\n", padding)
+	flusher.Flush()
+	// ------------------------------------------
+
 	logChan := Hub.Register(serviceName)
 	log.Printf("[SSE] Cliente conectado a %s", serviceName)
 
@@ -172,21 +176,21 @@ func StreamLogs(c *gin.Context) {
 		log.Printf("[SSE] Cliente desconectado de %s", serviceName)
 	}()
 
-	// 4. Inyectamos el mensaje directamente AL CANAL
-	// Al mandarlo por aquí, el bucle de abajo lo procesará como un log real
-	logChan <- LogResponse{
+	// EL MENSAJE DE BIENVENIDA
+	welcomeMsg, _ := json.Marshal(LogResponse{
 		Timestamp: time.Now().Format(time.RFC3339),
 		Severity:  "INFO",
 		Message:   "Conexión ultra-rápida establecida. Esperando actividad...",
-	}
+	})
+	fmt.Fprintf(w, "data: %s\n\n", welcomeMsg)
+	flusher.Flush()
+	// ------------------------------------------
 
-	// 5. Bucle pasivo de transmisión
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case logMsg := <-logChan:
-			// Todos los mensajes (incluyendo la bienvenida) pasan por aquí
 			respJSON, _ := json.Marshal(logMsg)
 			fmt.Fprintf(w, "data: %s\n\n", respJSON)
 			flusher.Flush()
