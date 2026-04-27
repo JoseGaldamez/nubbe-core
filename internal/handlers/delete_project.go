@@ -18,7 +18,7 @@ type JobPayload struct {
 	UserID   string `json:"userId"`
 }
 
-func DeleteProjectAsync(c *gin.Context) {
+func (app *App) DeleteProjectAsync(c *gin.Context) {
 	appID := c.Param("id")
 	userID := c.GetString("user_id")
 
@@ -28,15 +28,9 @@ func DeleteProjectAsync(c *gin.Context) {
 		return
 	}
 
-	if FsClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Conexión a DB no inicializada"})
-		return
-	}
-
-	// 1. Obtener el repo name desde firestore (Arquitectura segura por subcolección)
-	dsnap, err := FsClient.Collection("users").Doc(userID).Collection("projects").Doc(appID).Get(c.Request.Context())
+	// 1. Obtener detalles del proyecto vía Service
+	projectDetails, err := app.ProjectService.GetProjectDetails(c.Request.Context(), userID, appID)
 	if err != nil {
-		// Diferenciamos si fue un error real o si simplemente el proyecto no existe
 		if status.Code(err) == codes.NotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "El proyecto no existe o no te pertenece"})
 			return
@@ -45,15 +39,7 @@ func DeleteProjectAsync(c *gin.Context) {
 		return
 	}
 
-	var userData struct {
-		RepoName string `firestore:"repo_name"`
-	}
-	if errFirebase := dsnap.DataTo(&userData); errFirebase != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse project data", "details": errFirebase.Error()})
-		return
-	}
-
-	if userData.RepoName == "" {
+	if projectDetails.RepoName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Repo Name not found in project"})
 		return
 	}
@@ -73,7 +59,7 @@ func DeleteProjectAsync(c *gin.Context) {
 	payload, _ := json.Marshal(JobPayload{
 		Action:   "delete_project",
 		AppID:    appID,
-		RepoName: userData.RepoName,
+		RepoName: projectDetails.RepoName,
 		UserID:   userID,
 	})
 

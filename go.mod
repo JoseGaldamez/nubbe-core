@@ -1,21 +1,24 @@
 module github.com/JoseGaldamez/nubbe-core
 
-go 1.25.7
+go 1.25.0
 
 require (
+	cloud.google.com/go/artifactregistry v1.23.0
 	cloud.google.com/go/firestore v1.21.0
+	cloud.google.com/go/pubsub/v2 v2.6.0
+	cloud.google.com/go/run v1.19.0
 	cloud.google.com/go/storage v1.62.0
 	firebase.google.com/go/v4 v4.19.0
 	github.com/gin-contrib/cors v1.7.7
 	github.com/gin-gonic/gin v1.12.0
 	github.com/joho/godotenv v1.5.1
 	google.golang.org/api v0.276.0
+	google.golang.org/grpc v1.80.0
 )
 
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/artifactregistry v1.23.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
@@ -23,9 +26,6 @@ require (
 	cloud.google.com/go/logging v1.16.0 // indirect
 	cloud.google.com/go/longrunning v0.10.0 // indirect
 	cloud.google.com/go/monitoring v1.26.0 // indirect
-	cloud.google.com/go/pubsub v1.50.2 // indirect
-	cloud.google.com/go/pubsub/v2 v2.6.0 // indirect
-	cloud.google.com/go/run v1.19.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.32.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.56.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.56.0 // indirect
@@ -91,6 +91,5 @@ require (
 	google.golang.org/genproto v0.0.0-20260406210006-6f92a3bedf2d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260406210006-6f92a3bedf2d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260406210006-6f92a3bedf2d // indirect
-	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )

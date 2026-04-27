@@ -11,7 +11,6 @@ import (
 
 	artifactregistry "cloud.google.com/go/artifactregistry/apiv1"
 	"cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
-	"cloud.google.com/go/firestore"
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"github.com/gin-gonic/gin"
@@ -25,7 +24,7 @@ type PubSubPushRequest struct {
 	} `json:"message"`
 }
 
-func JobWorkerDeleteProject(c *gin.Context) {
+func (app *App) JobWorkerDeleteProject(c *gin.Context) {
 	var pushReq PubSubPushRequest
 	if err := c.ShouldBindJSON(&pushReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Payload inválido"})
@@ -55,45 +54,26 @@ func JobWorkerDeleteProject(c *gin.Context) {
 	if job.Action == "delete_project" {
 		log.Printf("[Worker] Iniciando destrucción de %s", job.AppID)
 
-		if FsClient == nil {
-			log.Println("[Worker] Error: Firestore client not initialized")
-			// Devolvemos 500 para que PubSub SÍ reintente, porque esto es un fallo de nuestro servidor, no del usuario.
-			c.Status(http.StatusInternalServerError)
-			return
-		}
-
-		dsnap, err := FsClient.Collection("users").Doc(job.UserID).Get(c.Request.Context())
+		// Fetch user token via Service
+		token, err := app.ProjectService.GetUserToken(c.Request.Context(), job.UserID)
 		if err != nil {
 			log.Printf("[Worker] Failed to fetch user data para %s: %v", job.UserID, err)
 			c.Status(http.StatusOK) // ACK para descartar (error permanente)
 			return
 		}
 
-		var userData struct {
-			GithubAccessToken string `firestore:"githubAccessToken"`
-		}
-		if err := dsnap.DataTo(&userData); err != nil {
-			log.Printf("[Worker] Failed to parse user data para %s: %v", job.UserID, err)
+		// Update project status via Service
+		if err := app.ProjectService.UpdateProjectStatus(c.Request.Context(), job.UserID, job.AppID, "deleting"); err != nil {
+			log.Printf("[Worker] Failed to update status para %s: %v", job.UserID, err)
 			c.Status(http.StatusOK)
 			return
 		}
-
-		statusChanged, errorStatus := FsClient.Collection("users").Doc(job.UserID).Collection("projects").Doc(job.AppID).Update(c.Request.Context(), []firestore.Update{
-			{Path: "status", Value: "deleting"},
-		})
-		if errorStatus != nil {
-			log.Printf("[Worker] Failed to update status para %s: %v", job.UserID, errorStatus)
-			c.Status(http.StatusOK)
-			return
-		}
-
-		log.Printf("[Worker] Status changed para %s: %v", job.UserID, statusChanged)
 
 		// ----------------------------------------- Ahora sí a borrar -----------------------------------------
 
-		// 1. Borrar Webhook de GitHub
-		if userData.GithubAccessToken != "" {
-			errGH := DeleteGitHubWebhook(c.Request.Context(), job.UserID, job.AppID, job.RepoName, userData.GithubAccessToken)
+		// 1. Borrar Webhook de GitHub via Service
+		if token != "" {
+			errGH := app.ProjectService.DeleteGitHubWebhook(c.Request.Context(), job.UserID, job.AppID, job.RepoName, token)
 			if errGH != nil {
 				log.Printf("[Worker] Advertencia en GitHub Webhook: %v", errGH)
 			}
@@ -114,7 +94,7 @@ func JobWorkerDeleteProject(c *gin.Context) {
 		}
 
 		// 4. Borrar de Firebase (Firestore)
-		errDb := deleteFirebaseDoc(c.Request.Context(), job.UserID, job.AppID)
+		errDb := app.deleteFirebaseDoc(c.Request.Context(), job.UserID, job.AppID)
 		if errDb != nil {
 			log.Printf("[Worker] Advertencia borrando registro en DB: %v", errDb)
 			// No retornamos error aquí para permitir que el proceso termine con un 200 OK
@@ -188,11 +168,11 @@ func deleteCloudRunService(ctx context.Context, projectID, location, serviceName
 }
 
 // deleteFirebaseDoc elimina el registro de la aplicación de Firestore.
-func deleteFirebaseDoc(ctx context.Context, userId, appID string) error {
-	// Usamos el cliente global FsClient que ya tienes inicializado
+func (app *App) deleteFirebaseDoc(ctx context.Context, userId, appID string) error {
+	// Usamos el cliente inyectado en a.Firestore
 	log.Printf("[Firestore] Solicitando eliminación del documento: %s", appID)
 
-	_, err := FsClient.Collection("users").Doc(userId).Collection("projects").Doc(appID).Delete(ctx)
+	_, err := app.Firestore.Collection("users").Doc(userId).Collection("projects").Doc(appID).Delete(ctx)
 	if err != nil {
 		// Si el documento ya no existe, lo consideramos un éxito (Idempotencia)
 		if status.Code(err) == codes.NotFound {

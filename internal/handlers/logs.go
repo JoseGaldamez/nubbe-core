@@ -133,7 +133,7 @@ func StartPubSubSubscriber(projectID string) {
 // 3. EL HANDLER (Sin cambios)
 // ---------------------------------------------------------
 
-func StreamLogs(c *gin.Context) {
+func (app *App) StreamLogs(c *gin.Context) {
 	serviceName := c.Query("serviceName")
 
 	if serviceName == "" {
@@ -199,7 +199,7 @@ func StreamLogs(c *gin.Context) {
 }
 
 // GetBuildLogs actúa como un proxy para leer los logs de Cloud Build desde GCS.
-func GetBuildLogs(c *gin.Context) {
+func (app *App) GetBuildLogs(c *gin.Context) {
 	buildID := c.Param("buildId")
 	if buildID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "buildId is required"})
@@ -211,13 +211,13 @@ func GetBuildLogs(c *gin.Context) {
 		bucketName = "nubbe-build-logs" // Fallback por si no está en env
 	}
 
-	if StorageClient == nil {
+	if app.Storage == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage client not initialized"})
 		return
 	}
 
 	objectName := fmt.Sprintf("log-%s.txt", buildID)
-	rc, err := StorageClient.Bucket(bucketName).Object(objectName).NewReader(c.Request.Context())
+	rc, err := app.Storage.Bucket(bucketName).Object(objectName).NewReader(c.Request.Context())
 	if err != nil {
 		if err == storage.ErrObjectNotExist {
 			// Manejo de error amigable solicitado

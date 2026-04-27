@@ -1,15 +1,11 @@
 package handlers
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
-	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
 )
@@ -31,7 +27,7 @@ func getFriendlyMessage(status string) string {
 }
 
 // HandleCloudBuildWebhook procesa las notificaciones de estado de Cloud Build.
-func HandleCloudBuildWebhook(c *gin.Context) {
+func (app *App) HandleCloudBuildWebhook(c *gin.Context) {
 	var psMsg PubSubMessage
 	if err := c.ShouldBindJSON(&psMsg); err != nil {
 		log.Printf("Error decodificando mensaje Pub/Sub: %v", err)
@@ -78,46 +74,13 @@ func HandleCloudBuildWebhook(c *gin.Context) {
 
 	log.Printf("Procesando Build: %s, Status: %s, ProjectId: %s, UserId: %s", buildID, status, projectId, userID)
 
-	// Actualizar Firestore (incluyendo sub-colección de builds e historial)
-	if err := updateProjectStatus(c.Request.Context(), userID, projectId, buildID, status, logURL); err != nil {
-		log.Printf("Error actualizando Firestore: %v", err)
+	// Actualizar estado vía Service
+	friendlyMsg := getFriendlyMessage(status)
+	if err := app.ProjectService.UpdateStatus(c.Request.Context(), userID, projectId, buildID, status, logURL, friendlyMsg); err != nil {
+		log.Printf("Error actualizando Firestore vía Service: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
-}
-
-// updateProjectStatus actualiza el historial y estado de un build en la sub-colección del proyecto.
-func updateProjectStatus(ctx context.Context, userID, projectID, buildID, status, logURL string) error {
-	if FsClient == nil {
-		return fmt.Errorf("firestore client no inicializado")
-	}
-
-	now := time.Now()
-	friendlyMsg := getFriendlyMessage(status)
-
-	// Crear entrada de historial para ArrayUnion
-	historyEntry := map[string]interface{}{
-		"status":    status,
-		"message":   friendlyMsg,
-		"timestamp": now,
-	}
-
-	// Referencia al documento del build dentro de la ruta jerárquica:
-	// users/{userId}/projects/{projectID}/builds/{buildID}
-	buildRef := FsClient.Collection("users").Doc(userID).
-		Collection("projects").Doc(projectID).
-		Collection("builds").Doc(buildID)
-
-	// Usamos Set con MergeAll para crear el documento si no existe o actualizar campos específicos
-	_, err := buildRef.Set(ctx, map[string]interface{}{
-		"buildId":   buildID,
-		"status":    status,
-		"logUrl":    logURL,
-		"updatedAt": now,
-		"history":   firestore.ArrayUnion(historyEntry),
-	}, firestore.MergeAll)
-
-	return err
 }

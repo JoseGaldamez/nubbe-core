@@ -8,29 +8,22 @@ import (
 	"cloud.google.com/go/storage"
 )
 
-var (
-	FsClient      *firestore.Client
-	StorageClient *storage.Client
-)
-
-// InitFirestore inicializa el cliente global de Firestore.
-func InitFirestore(ctx context.Context, gcpProjectID string) error {
+// InitFirestore inicializa el cliente de Firestore y lo devuelve.
+func InitFirestore(ctx context.Context, gcpProjectID string) (*firestore.Client, error) {
 	client, err := firestore.NewClient(ctx, gcpProjectID)
 	if err != nil {
-		return fmt.Errorf("error al crear el cliente de Firestore: %w", err)
+		return nil, fmt.Errorf("error al crear el cliente de Firestore: %w", err)
 	}
-	FsClient = client
-	return nil
+	return client, nil
 }
 
-// InitStorage inicializa el cliente global de Google Cloud Storage.
-func InitStorage(ctx context.Context) error {
+// InitStorage inicializa el cliente de Google Cloud Storage y lo devuelve.
+func InitStorage(ctx context.Context) (*storage.Client, error) {
 	client, err := storage.NewClient(ctx)
 	if err != nil {
-		return fmt.Errorf("error al crear el cliente de Storage: %w", err)
+		return nil, fmt.Errorf("error al crear el cliente de Storage: %w", err)
 	}
-	StorageClient = client
-	return nil
+	return client, nil
 }
 
 // PubSubMessage representa el cuerpo de la petición que envía Pub/Sub.
