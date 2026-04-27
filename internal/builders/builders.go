@@ -39,17 +39,35 @@ CMD ["nginx", "-g", "daemon off;"]`
 type AstroBuilder struct{}
 
 func (b *AstroBuilder) GetDockerfile(entryPoint string) string {
-	return `FROM node:20-alpine AS build
+	return `FROM node:22-alpine AS builder
 WORKDIR /app
 COPY . .
-RUN if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install --frozen-lockfile; \
-    elif [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
-    elif [ -f bun.lockb ]; then corepack enable && bun install --frozen-lockfile; \
-    else npm install; fi
+
+# Autodetección del gestor de paquetes con corrección para dependencias nativas (esbuild/sharp)
+RUN if [ -f "pnpm-lock.yaml" ]; then \
+        echo "Usando pnpm..." && \
+        corepack enable && \
+        pnpm config set ignore-scripts false && \
+        pnpm install --frozen-lockfile; \
+    elif [ -f "yarn.lock" ]; then \
+        echo "Usando yarn..." && \
+        corepack enable && \
+        yarn install --frozen-lockfile; \
+    elif [ -f "bun.lockb" ]; then \
+        echo "Usando bun..." && \
+        npm install -g bun && \
+        bun install --frozen-lockfile; \
+    else \
+        echo "Usando npm por defecto..." && \
+        npm install; \
+    fi
+
+# Compilar el sitio estático
 RUN npm run build
 
+# Etapa de producción
 FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]`
 }
