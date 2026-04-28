@@ -76,7 +76,7 @@ func (service *googleBuildService) TriggerBuild(ctx context.Context, userID, sub
 			},
 			{
 				Name: "ubuntu",
-				Args: []string{"bash", "-c", fmt.Sprintf("echo '%s' > Dockerfile", dynamicDockerfile)},
+				Args: []string{"bash", "-c", fmt.Sprintf("cat <<'DOCKERFILE_CONTENT' > Dockerfile\n%s\nDOCKERFILE_CONTENT", dynamicDockerfile)},
 			},
 			{
 				Name: "gcr.io/cloud-builders/docker",
