@@ -43,27 +43,28 @@ func (b *AstroBuilder) GetDockerfile(entryPoint string) string {
 WORKDIR /app
 COPY . .
 
-# 1. Autodetección del gestor de paquetes y dependencias nativas
+# 1 y 2. Autodetección del gestor, instalación y compilación unificadas
 RUN if [ -f "pnpm-lock.yaml" ]; then \
         echo "Usando pnpm..." && \
         corepack enable && \
         pnpm config set ignore-scripts false && \
-        pnpm install --frozen-lockfile; \
+        pnpm install --frozen-lockfile && \
+        pnpm run build; \
     elif [ -f "yarn.lock" ]; then \
         echo "Usando yarn..." && \
         corepack enable && \
-        yarn install --frozen-lockfile; \
+        yarn install --frozen-lockfile && \
+        yarn run build; \
     elif [ -f "bun.lockb" ]; then \
         echo "Usando bun..." && \
         npm install -g bun && \
-        bun install --frozen-lockfile; \
+        bun install --frozen-lockfile && \
+        bun run build; \
     else \
         echo "Usando npm por defecto..." && \
-        npm install; \
+        npm install && \
+        npm run build; \
     fi
-
-# 2. Compilar el sitio estático
-RUN npm run build
 
 # 3. Red de Seguridad: Inyectar 404 por defecto si el usuario no lo creó
 RUN if [ ! -f "dist/404.html" ]; then \
