@@ -55,10 +55,19 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 	api := router.Group("/api/v1")
 	api.Use(middleware.FirebaseAuthMiddleware(app.Auth))
 	{
+		// create proyect
 		api.POST("/projects/initialize", app.HandleCreateProject)
+
+		// delete proyect
 		api.DELETE("/projects/:id", app.DeleteProjectAsync)
+
+		// Logs
 		api.GET("/projects/:projectId/builds/:buildId/logs", app.GetBuildLogs)
 		api.GET("/logs/stream", app.StreamLogs)
+
+		// Environment Variables
+		api.GET("/projects/:projectId/env_vars", app.GetProjectEnvVars)
+		api.POST("/projects/:projectId/env_vars", app.SaveProjectEnvVars)
 	}
 
 	// Grupo de rutas para Webhooks externos
