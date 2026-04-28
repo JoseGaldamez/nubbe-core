@@ -27,7 +27,7 @@ func NewBuildService() BuildService {
 	return &googleBuildService{}
 }
 
-func (s *googleBuildService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string) (*BuildInfo, error) {
+func (service *googleBuildService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string) (*BuildInfo, error) {
 	projectID := os.Getenv("GCP_PROJECT_ID")
 
 	builder, err := builders.GetBuilder(projectType)

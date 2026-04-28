@@ -43,7 +43,7 @@ func (b *AstroBuilder) GetDockerfile(entryPoint string) string {
 WORKDIR /app
 COPY . .
 
-# Autodetección del gestor de paquetes con corrección para dependencias nativas (esbuild/sharp)
+# 1. Autodetección del gestor de paquetes y dependencias nativas
 RUN if [ -f "pnpm-lock.yaml" ]; then \
         echo "Usando pnpm..." && \
         corepack enable && \
@@ -62,12 +62,77 @@ RUN if [ -f "pnpm-lock.yaml" ]; then \
         npm install; \
     fi
 
-# Compilar el sitio estático
+# 2. Compilar el sitio estático
 RUN npm run build
 
-# Etapa de producción
+# 3. Red de Seguridad: Inyectar 404 por defecto si el usuario no lo creó
+RUN if [ ! -f "dist/404.html" ]; then \
+        echo '<!DOCTYPE html>
+<html>
+
+<head>
+    <title>404 - No Encontrado</title>
+    <style>
+        body {
+            background-color: #111;
+            color: #fff;
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+
+        h1 {
+            color: #67e8f9;
+            margin-bottom: 8px;
+        }
+
+        p {
+            color: #9ca3af;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <h1>404</h1>
+        <p>Esta página no pudo ser encontrada.</p>
+        <p style="font-size:1rem;margin-top:24px;color:#4b5563;">Desplegado en <span
+                style="color: #ffffff; font-weight: 700;">nubbe<span style="color: #00e5ff;">.run</span></span>
+        </p>
+    </div>
+</body>
+
+</html>' > dist/404.html; \
+    fi
+
+# 4. Etapa de Producción ultraligera con Nginx
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
+
+# 5. Configuración maestra de Nginx
+RUN cat <<'EOF' > /etc/nginx/conf.d/default.conf
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Capturar el error 404 y servir nuestro archivo
+    error_page 404 /404.html;
+    location = /404.html {
+        internal;
+    }
+
+    # Enrutamiento inteligente para "URLs bonitas" de Astro
+    location / {
+        try_files $uri $uri/ $uri.html /404.html;
+    }
+}
+EOF
+
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]`
 }
