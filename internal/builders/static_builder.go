@@ -69,8 +69,10 @@ EOF
 	}
 
 	buildObj := &cloudbuild.Build{
-		LogsBucket: "gs://nubbe-build-logs", // Asegúrate de que este bucket exista en tu GCP
+		LogsBucket: "gs://nubbe-build-logs",
 		Substitutions: map[string]string{
+			"_PROJECT_ID": config.SubDomain,
+			"_USER_ID":    config.UserID,
 			"_SUB_DOMAIN": config.SubDomain,
 			"_REPO_NAME":  config.RepoName,
 			"_BRANCH":     branch,
