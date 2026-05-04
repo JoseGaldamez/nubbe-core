@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/api/cloudbuild/v1"
 )
@@ -42,8 +43,20 @@ func (b *StaticBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 
 	errorPage := config.AdvancedConfig["error_page"]
 
+	userHash := strings.ToLower(config.UserID)
+	if len(userHash) > 6 {
+		userHash = userHash[:6]
+	}
+
+	safeSubDomain := config.SubDomain
+	if len(safeSubDomain) > 35 {
+		safeSubDomain = safeSubDomain[:35]
+	}
+
+	cfProjectName := fmt.Sprintf("nubbe-run-%s-%s", safeSubDomain, userHash)
+
 	// 1. Asegurar la existencia del proyecto en CF (Ligero y rápido en Go)
-	if err := b.ensureCloudflareProject(ctx, cfAccountID, cfAPIToken, config.SubDomain, branch); err != nil {
+	if err := b.ensureCloudflareProject(ctx, cfAccountID, cfAPIToken, cfProjectName, branch); err != nil {
 		return nil, fmt.Errorf("error asegurando proyecto en Cloudflare: %w", err)
 	}
 
@@ -74,7 +87,7 @@ EOF
 			"_PROJECT_ID":   config.SubDomain,
 			"_USER_ID":      config.UserID,
 			"_PROJECT_TYPE": "static",
-			"_SUB_DOMAIN":   config.SubDomain,
+			"_SUB_DOMAIN":   cfProjectName,
 			"_REPO_NAME":    config.RepoName,
 			"_BRANCH":       branch,
 			"_ENTRY_PT":     entryPoint,
@@ -118,6 +131,15 @@ EOF
 		return nil, fmt.Errorf("fallo al disparar cloudbuild: %w", err)
 	}
 
+	kvNamespaceID := os.Getenv("CLOUDFLARE_KV_NAMESPACE_ID")
+	if kvNamespaceID != "" {
+		// Esta es la función registerRouteInKV que definimos anteriormente
+		errKV := b.registerRouteInKV(ctx, cfAccountID, cfAPIToken, kvNamespaceID, config.SubDomain, cfProjectName)
+		if errKV != nil {
+			fmt.Printf("[Advertencia KV] No se pudo registrar la ruta %s.nubbe.run: %v\n", cfProjectName, errKV)
+		}
+	}
+
 	var buildMeta cloudbuild.BuildOperationMetadata
 	json.Unmarshal(resp.Metadata, &buildMeta)
 
@@ -152,9 +174,54 @@ func (b *StaticBuilder) ensureCloudflareProject(ctx context.Context, accountID, 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusBadRequest {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("respuesta inesperada API CF (%d): %s", resp.StatusCode, string(respBody))
+	// 200 OK: El proyecto no existía y se creó exitosamente
+	if resp.StatusCode == http.StatusOK {
+		return nil
 	}
+
+	// 409 Conflict: El proyecto ya existe (Error 8000002 de Cloudflare).
+	// Esto es el comportamiento esperado en un redespliegue, así que lo damos por válido.
+	if resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+
+	// Cualquier otro código (401, 403, 500...) sí es un error real que debemos reportar
+	respBody, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("respuesta inesperada API CF (%d): %s", resp.StatusCode, string(respBody))
+}
+
+// registerRouteInKV guarda el mapeo del subdominio hacia el proyecto de Cloudflare Pages en KV
+func (b *StaticBuilder) registerRouteInKV(ctx context.Context, accountID, token, kvNamespaceID, subDomain, cfProjectName string) error {
+	// La clave (key) será el subdominio completo: mi-proyecto.nubbe.run
+	key := fmt.Sprintf("%s.nubbe.run", subDomain)
+
+	// El valor (value) será el destino real en Pages
+	value := fmt.Sprintf("https://%s.pages.dev", cfProjectName)
+
+	// La URL de la API de Cloudflare para escribir un par clave-valor (PUT)
+	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s/values/%s",
+		accountID, kvNamespaceID, key)
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", apiURL, strings.NewReader(value))
+	if err != nil {
+		return fmt.Errorf("error creando petición KV: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	// Para KV, el body se envía como texto plano si es solo un string
+	req.Header.Set("Content-Type", "text/plain")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error ejecutando petición KV: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("Cloudflare KV API respondió con error (%d): %s", resp.StatusCode, string(respBody))
+	}
+
 	return nil
 }
