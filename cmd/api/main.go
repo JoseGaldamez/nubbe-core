@@ -14,7 +14,6 @@ import (
 	"github.com/JoseGaldamez/nubbe-core/internal/handlers"
 	"github.com/JoseGaldamez/nubbe-core/internal/repository"
 	"github.com/JoseGaldamez/nubbe-core/internal/service"
-	"github.com/JoseGaldamez/nubbe-core/internal/service/build"
 )
 
 func main() {
@@ -51,8 +50,7 @@ func main() {
 	// 3. Initialize Repositories and Services
 	userRepo := repository.NewUserRepository(fsClient)
 	projectRepo := repository.NewProjectRepository(fsClient)
-	buildService := build.NewBuildService()
-	projectService := service.NewProjectService(userRepo, projectRepo, buildService, cfg.AESEncryptionKey)
+	projectService := service.NewProjectService(userRepo, projectRepo, cfg.AESEncryptionKey)
 
 	// 4. Setup Application and Router
 	appDeps := handlers.NewApp(fsClient, storageClient, authClient, projectService)

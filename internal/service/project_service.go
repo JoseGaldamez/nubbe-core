@@ -8,33 +8,51 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/JoseGaldamez/nubbe-core/internal/pkg/crypto"
 	"github.com/JoseGaldamez/nubbe-core/internal/repository"
-	"github.com/JoseGaldamez/nubbe-core/internal/service/build"
 )
 
 type ProjectService struct {
-	userRepo     repository.UserRepository
-	projectRepo  repository.ProjectRepository
-	buildService build.BuildService
-	aesKey       string
+	userRepo    repository.UserRepository
+	projectRepo repository.ProjectRepository
+	aesKey      string
 }
 
-func NewProjectService(ur repository.UserRepository, pr repository.ProjectRepository, bs build.BuildService, aesKey string) *ProjectService {
+func NewProjectService(ur repository.UserRepository, pr repository.ProjectRepository, aesKey string) *ProjectService {
 	return &ProjectService{
-		userRepo:     ur,
-		projectRepo:  pr,
-		buildService: bs,
-		aesKey:       aesKey,
+		userRepo:    ur,
+		projectRepo: pr,
+		aesKey:      aesKey,
 	}
 }
 
-func (service *ProjectService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string, advancedConfig map[string]string) (*build.BuildInfo, error) {
-	info, err := service.buildService.TriggerBuild(ctx, userID, subDomain, repoName, projectType, githubToken, entryPoint, envVars, advancedConfig)
+// TriggerBuild coordina el despliegue utilizando el Patrón Estrategia para manejar diferentes proveedores (GCP, Cloudflare, etc.)
+func (service *ProjectService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string, advancedConfig map[string]string) (*builders.BuildResult, error) {
+	// 1. Obtener el constructor específico según el tipo de proyecto
+	builder, err := builders.GetBuilderByType(projectType)
 	if err != nil {
-		return nil, fmt.Errorf("project service failed to trigger build: %w", err)
+		return nil, fmt.Errorf("error al obtener constructor para %s: %w", projectType, err)
 	}
-	return info, nil
+
+	// 2. Encapsular la configuración del despliegue
+	config := builders.BuildConfig{
+		UserID:         userID,
+		SubDomain:      subDomain,
+		RepoName:       repoName,
+		GithubToken:    githubToken,
+		EntryPoint:     entryPoint,
+		EnvVars:        envVars,
+		AdvancedConfig: advancedConfig,
+	}
+
+	// 3. Ejecutar la estrategia de despliegue delegada
+	result, err := builder.Deploy(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("el despliegue de tipo %s falló: %w", projectType, err)
+	}
+
+	return result, nil
 }
 
 func (service *ProjectService) GetUserToken(ctx context.Context, userID string) (string, error) {
