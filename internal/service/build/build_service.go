@@ -18,7 +18,7 @@ type BuildInfo struct {
 }
 
 type BuildService interface {
-	TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string) (*BuildInfo, error)
+	TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string, advancedConfig map[string]string) (*BuildInfo, error)
 }
 
 type googleBuildService struct{}
@@ -27,14 +27,14 @@ func NewBuildService() BuildService {
 	return &googleBuildService{}
 }
 
-func (service *googleBuildService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string) (*BuildInfo, error) {
+func (service *googleBuildService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string, advancedConfig map[string]string) (*BuildInfo, error) {
 	projectID := os.Getenv("GCP_PROJECT_ID")
 
 	builder, err := builders.GetBuilder(projectType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get builder for %s: %w", projectType, err)
 	}
-	dynamicDockerfile := builder.GetDockerfile(entryPoint)
+	dynamicDockerfile := builder.GetDockerfile(entryPoint, advancedConfig)
 
 	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", projectID, subDomain)
 

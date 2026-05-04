@@ -71,7 +71,7 @@ func (app *App) HandleGitHubWebhook(ctx *gin.Context) {
 	}
 
 	// Trigger Cloud Build via Service
-	info, err := app.ProjectService.TriggerBuild(ctx.Request.Context(), uid, pid, projectData.RepoName, projectData.ProjectType, token, projectData.EntryPoint, envVars)
+	info, err := app.ProjectService.TriggerBuild(ctx.Request.Context(), uid, pid, projectData.RepoName, projectData.ProjectType, token, projectData.EntryPoint, envVars, projectData.AdvancedConfig)
 	if err != nil {
 		log.Printf("Webhook error: failed to trigger build: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to trigger build"})

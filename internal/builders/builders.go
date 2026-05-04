@@ -5,23 +5,20 @@ import (
 )
 
 type ProjectBuilder interface {
-	GetDockerfile(entryPoint string) string
+	GetDockerfile(entryPoint string, advancedConfig map[string]string) string
 }
 
 // --- Static Builder ---
 type StaticBuilder struct{}
 
-func (b *StaticBuilder) GetDockerfile(entryPoint string) string {
-	return `FROM nginx:alpine
-COPY . /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]`
+func (b *StaticBuilder) GetDockerfile(entryPoint string, advancedConfig map[string]string) string {
+	return GenerateStaticDockerfile(entryPoint, advancedConfig)
 }
 
 // --- React Builder ---
 type ReactBuilder struct{}
 
-func (b *ReactBuilder) GetDockerfile(entryPoint string) string {
+func (b *ReactBuilder) GetDockerfile(entryPoint string, advancedConfig map[string]string) string {
 	return `FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
@@ -38,7 +35,7 @@ CMD ["nginx", "-g", "daemon off;"]`
 // --- Astro Builder ---
 type AstroBuilder struct{}
 
-func (b *AstroBuilder) GetDockerfile(entryPoint string) string {
+func (b *AstroBuilder) GetDockerfile(entryPoint string, advancedConfig map[string]string) string {
 	return `FROM node:22-alpine AS builder
 WORKDIR /app
 COPY . .
@@ -85,7 +82,7 @@ CMD ["nginx", "-g", "daemon off;"]`
 // --- Node Builder (Refactorizado) ---
 type NodeBuilder struct{}
 
-func (b *NodeBuilder) GetDockerfile(entryPoint string) string {
+func (b *NodeBuilder) GetDockerfile(entryPoint string, advancedConfig map[string]string) string {
 	return fmt.Sprintf(`FROM node:20-alpine
 WORKDIR /app
 COPY . .
@@ -100,7 +97,7 @@ CMD ["sh", "-c", "%s"]`, entryPoint)
 // --- Go Builder ---
 type GoBuilder struct{}
 
-func (b *GoBuilder) GetDockerfile(entryPoint string) string {
+func (b *GoBuilder) GetDockerfile(entryPoint string, advancedConfig map[string]string) string {
 	return `FROM golang:1.24-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./

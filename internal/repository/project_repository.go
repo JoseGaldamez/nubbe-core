@@ -50,10 +50,11 @@ func (r *firestoreProjectRepo) GetProjectVars(ctx context.Context, userID, proje
 }
 
 type ProjectDetails struct {
-	Branch      string `firestore:"branch"`
-	RepoName    string `firestore:"repo_name"`
-	ProjectType string `firestore:"project_type"`
-	EntryPoint  string `firestore:"entry_point"`
+	Branch         string            `firestore:"branch"`
+	RepoName       string            `firestore:"repo_name"`
+	ProjectType    string            `firestore:"project_type"`
+	EntryPoint     string            `firestore:"entry_point"`
+	AdvancedConfig map[string]string `firestore:"advanced_config"`
 }
 
 type firestoreProjectRepo struct {

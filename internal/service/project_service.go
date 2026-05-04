@@ -29,8 +29,8 @@ func NewProjectService(ur repository.UserRepository, pr repository.ProjectReposi
 	}
 }
 
-func (service *ProjectService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string) (*build.BuildInfo, error) {
-	info, err := service.buildService.TriggerBuild(ctx, userID, subDomain, repoName, projectType, githubToken, entryPoint, envVars)
+func (service *ProjectService) TriggerBuild(ctx context.Context, userID, subDomain, repoName, projectType, githubToken, entryPoint string, envVars map[string]string, advancedConfig map[string]string) (*build.BuildInfo, error) {
+	info, err := service.buildService.TriggerBuild(ctx, userID, subDomain, repoName, projectType, githubToken, entryPoint, envVars, advancedConfig)
 	if err != nil {
 		return nil, fmt.Errorf("project service failed to trigger build: %w", err)
 	}

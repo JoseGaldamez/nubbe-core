@@ -12,13 +12,14 @@ import (
 
 // CreateProjectRequest defines the structure for the incoming project creation payload.
 type CreateProjectRequest struct {
-	ProjectType string            `json:"project_type" binding:"required,oneof=static react nodejs astro go"`
-	EntryPoint  string            `json:"entry_point" binding:"required"`
-	RepoName    string            `json:"repo_name" binding:"required"`
-	Title       string            `json:"title" binding:"required"`
-	SubDomain   string            `json:"sub_domine" binding:"required"`
-	Branch      string            `json:"branch" binding:"required"`
-	EnvVars     map[string]string `json:"env_vars"`
+	ProjectType    string            `json:"project_type" binding:"required,oneof=static react nodejs astro go"`
+	EntryPoint     string            `json:"entry_point" binding:"required"`
+	RepoName       string            `json:"repo_name" binding:"required"`
+	Title          string            `json:"title" binding:"required"`
+	SubDomain      string            `json:"sub_domain" binding:"required"`
+	Branch         string            `json:"branch" binding:"required"`
+	EnvVars        map[string]string `json:"env_vars"`
+	AdvancedConfig map[string]string `json:"advanced_config"`
 }
 
 // HandleCreateProject handles the project creation request and submits a build to Cloud Build.
@@ -71,7 +72,7 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 	}(userID, req.SubDomain, req.RepoName, token)
 
 	// 4. Trigger Initial Cloud Build via Service
-	info, err := app.ProjectService.TriggerBuild(ctx.Request.Context(), userID, req.SubDomain, req.RepoName, req.ProjectType, token, req.EntryPoint, req.EnvVars)
+	info, err := app.ProjectService.TriggerBuild(ctx.Request.Context(), userID, req.SubDomain, req.RepoName, req.ProjectType, token, req.EntryPoint, req.EnvVars, req.AdvancedConfig)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to trigger build", "details": err.Error()})
 		return
