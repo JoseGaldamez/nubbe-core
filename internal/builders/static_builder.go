@@ -90,6 +90,11 @@ EOF
 			{
 				Name: "ubuntu",
 				Args: []string{"bash", "-c", bashScript404},
+				Env: []string{
+					"IGNORE_PROJECT=$_PROJECT_ID",
+					"IGNORE_USER=$_USER_ID",
+					"IGNORE_TYPE=$_PROJECT_TYPE",
+				},
 			},
 			// Paso 3: Desplegar usando Wrangler en una imagen Node oficial
 			{
