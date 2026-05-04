@@ -71,13 +71,14 @@ EOF
 	buildObj := &cloudbuild.Build{
 		LogsBucket: "gs://nubbe-build-logs",
 		Substitutions: map[string]string{
-			"_PROJECT_ID": config.SubDomain,
-			"_USER_ID":    config.UserID,
-			"_SUB_DOMAIN": config.SubDomain,
-			"_REPO_NAME":  config.RepoName,
-			"_BRANCH":     branch,
-			"_ENTRY_PT":   entryPoint,
-			"_GH_TOKEN":   config.GithubToken,
+			"_PROJECT_ID":   config.SubDomain,
+			"_USER_ID":      config.UserID,
+			"_PROJECT_TYPE": "static",
+			"_SUB_DOMAIN":   config.SubDomain,
+			"_REPO_NAME":    config.RepoName,
+			"_BRANCH":       branch,
+			"_ENTRY_PT":     entryPoint,
+			"_GH_TOKEN":     config.GithubToken,
 		},
 		Steps: []*cloudbuild.BuildStep{
 			// Paso 1: Clonar el repositorio
