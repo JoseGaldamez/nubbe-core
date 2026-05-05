@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 
+	"github.com/JoseGaldamez/nubbe-core/internal/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/api/cloudbuild/v1"
 )
@@ -72,7 +74,12 @@ func (app *App) HandleCloudBuildWebhook(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Procesando Build: %s, Status: %s, ProjectId: %s, UserId: %s", buildID, status, projectId, userID)
+	projectType, ok := build.Substitutions["_PROJECT_TYPE"]
+	if !ok {
+		projectType = "unknown"
+	}
+
+	log.Printf("Procesando Build: %s, Status: %s, ProjectId: %s, UserId: %s, ProjectType: %s", buildID, status, projectId, userID, projectType)
 
 	// Actualizar estado vía Service
 	friendlyMsg := getFriendlyMessage(status)
@@ -80,6 +87,29 @@ func (app *App) HandleCloudBuildWebhook(c *gin.Context) {
 		log.Printf("Error actualizando Firestore vía Service: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
 		return
+	}
+
+	if status == "SUCCESS" && projectType == "nodejs" {
+		// Lo hacemos asíncrono usando context.Background() para no bloquear la respuesta HTTP
+		// y evitar que el contexto de Gin se cancele al terminar la petición.
+		go func(subDomain string) {
+			ctxBg := context.Background()
+
+			// Obtenemos la URL del contenedor de Google
+			cloudRunURL, err := utils.FetchCloudRunURL(ctxBg, subDomain)
+			if err != nil {
+				log.Printf("[Error Crítico] No se pudo obtener la URL de Cloud Run para %s: %v", subDomain, err)
+				return
+			}
+
+			// Lo registramos en Cloudflare
+			if err := utils.RegisterInCloudflareKV(ctxBg, subDomain, cloudRunURL); err != nil {
+				log.Printf("[Error Crítico] No se pudo registrar %s en KV: %v", subDomain, err)
+				return
+			}
+
+			log.Printf("[Éxito] Enrutamiento KV configurado: %s.nubbe.run -> %s", subDomain, cloudRunURL)
+		}(projectId) // Pasamos projectId (que es el subDomain)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})

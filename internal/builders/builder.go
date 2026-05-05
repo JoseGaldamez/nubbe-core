@@ -39,6 +39,8 @@ func GetBuilderByType(projectType string) (Builder, error) {
 		return NewStaticBuilder(), nil
 	case "astro":
 		return NewAstroBuilder(), nil
+	case "nodejs":
+		return NewNodejsBuilder(), nil
 	default:
 		return nil, fmt.Errorf("tipo de proyecto no soportado para el nuevo flujo: %s", projectType)
 	}
