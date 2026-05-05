@@ -142,7 +142,7 @@ npx --yes wrangler pages deploy %s --project-name $_SUB_DOMAIN --branch $_BRANCH
 				Args:       []string{"-c", "git clone --branch $_BRANCH https://x-access-token:$_GH_TOKEN@github.com/$_REPO_NAME.git ."},
 			},
 			{
-				Name:       "node:20",
+				Name:       "node:22",
 				Entrypoint: "bash",
 				Args:       []string{"-c", astroBuildScript},
 				Env: []string{
