@@ -34,11 +34,11 @@ type Builder interface {
 func GetBuilderByType(projectType string) (Builder, error) {
 	switch projectType {
 	case "react":
-		// Asegúrate de tener un func NewReactBuilder() definido en tu react_builder.go
 		return NewReactBuilder(), nil
 	case "static":
-		// Esto inicializa el struct y carga el os.Getenv("GCP_PROJECT_ID")
 		return NewStaticBuilder(), nil
+	case "astro":
+		return NewAstroBuilder(), nil
 	default:
 		return nil, fmt.Errorf("tipo de proyecto no soportado para el nuevo flujo: %s", projectType)
 	}
