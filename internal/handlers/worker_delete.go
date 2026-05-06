@@ -94,7 +94,7 @@ func (app *App) JobWorkerDeleteProject(c *gin.Context) {
 		}
 
 		// 4. Borrar de Firebase (Firestore)
-		errDb := app.deleteFirebaseDoc(c.Request.Context(), job.UserID, job.AppID)
+		errDb := app.ProjectService.DeleteProject(c.Request.Context(), job.UserID, job.AppID)
 		if errDb != nil {
 			log.Printf("[Worker] Advertencia borrando registro en DB: %v", errDb)
 			// No retornamos error aquí para permitir que el proceso termine con un 200 OK
@@ -164,24 +164,5 @@ func deleteCloudRunService(ctx context.Context, projectID, location, serviceName
 	}
 
 	log.Printf("[CloudRun] Servicio %s apagado y destruido exitosamente.", serviceName)
-	return nil
-}
-
-// deleteFirebaseDoc elimina el registro de la aplicación de Firestore.
-func (app *App) deleteFirebaseDoc(ctx context.Context, userId, appID string) error {
-	// Usamos el cliente inyectado en a.Firestore
-	log.Printf("[Firestore] Solicitando eliminación del documento: %s", appID)
-
-	_, err := app.Firestore.Collection("users").Doc(userId).Collection("projects").Doc(appID).Delete(ctx)
-	if err != nil {
-		// Si el documento ya no existe, lo consideramos un éxito (Idempotencia)
-		if status.Code(err) == codes.NotFound {
-			log.Printf("[Firestore] El documento %s ya no existe. Omitiendo...", appID)
-			return nil
-		}
-		return fmt.Errorf("error al eliminar documento de Firestore: %v", err)
-	}
-
-	log.Printf("[Firestore] Documento %s eliminado de la colección %s.", appID, userId)
 	return nil
 }

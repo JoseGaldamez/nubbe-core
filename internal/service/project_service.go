@@ -170,6 +170,13 @@ func (service *ProjectService) RegisterGitHubWebhook(ctx context.Context, userID
 	return nil
 }
 
+func (service *ProjectService) DeleteProject(ctx context.Context, userID, projectID string) error {
+	if err := service.projectRepo.DeleteProject(ctx, userID, projectID); err != nil {
+		return fmt.Errorf("service failed to delete project: %w", err)
+	}
+	return nil
+}
+
 func (service *ProjectService) DeleteGitHubWebhook(ctx context.Context, userID, projectID, repoName, token string) error {
 	payloadURL := fmt.Sprintf("https://api.nubbe.run/webhooks/github?uid=%s&pid=%s", userID, projectID)
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/hooks", repoName)

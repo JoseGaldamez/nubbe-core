@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/iterator"
 )
 
 type ProjectRepository interface {
@@ -14,6 +15,7 @@ type ProjectRepository interface {
 	GetProjectDetails(ctx context.Context, userID, projectID string) (*ProjectDetails, error)
 	SaveProjectVars(ctx context.Context, userID, projectID string, encryptedVars interface{}) error
 	GetProjectVars(ctx context.Context, userID, projectID string) (string, error)
+	DeleteProject(ctx context.Context, userID, projectID string) error
 }
 
 func (r *firestoreProjectRepo) SaveProjectVars(ctx context.Context, userID, projectID string, encryptedVars interface{}) error {
@@ -133,4 +135,30 @@ func (r *firestoreProjectRepo) GetProjectData(ctx context.Context, userID, proje
 		return nil, fmt.Errorf("failed to get project data: %w", err)
 	}
 	return doc.Data(), nil
+}
+
+func (r *firestoreProjectRepo) DeleteProject(ctx context.Context, userID, projectID string) error {
+	projectRef := r.client.Collection("users").Doc(userID).Collection("projects").Doc(projectID)
+
+	// 1. Borrar sub-colección de builds
+	buildsIter := projectRef.Collection("builds").Documents(ctx)
+	for {
+		doc, err := buildsIter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to iterate over builds: %w", err)
+		}
+		if _, err := doc.Ref.Delete(ctx); err != nil {
+			return fmt.Errorf("failed to delete build doc %s: %w", doc.Ref.ID, err)
+		}
+	}
+
+	// 2. Borrar documento del proyecto
+	if _, err := projectRef.Delete(ctx); err != nil {
+		return fmt.Errorf("failed to delete project doc: %w", err)
+	}
+
+	return nil
 }
