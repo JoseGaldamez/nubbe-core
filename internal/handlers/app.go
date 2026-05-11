@@ -8,6 +8,7 @@ import (
 	"cloud.google.com/go/storage"
 	firebaseAuth "firebase.google.com/go/v4/auth"
 	"github.com/JoseGaldamez/nubbe-core/internal/middleware"
+	"github.com/JoseGaldamez/nubbe-core/internal/pkg/pubsub"
 	"github.com/JoseGaldamez/nubbe-core/internal/service"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -19,16 +20,18 @@ type App struct {
 	Storage        *storage.Client
 	Auth           *firebaseAuth.Client
 	ProjectService *service.ProjectService
+	PubSub         *pubsub.Client
 	WG             sync.WaitGroup
 }
 
 // NewApp creates a new App instance with the provided dependencies.
-func NewApp(fs *firestore.Client, storage *storage.Client, auth *firebaseAuth.Client, projectService *service.ProjectService) *App {
+func NewApp(fs *firestore.Client, storage *storage.Client, auth *firebaseAuth.Client, projectService *service.ProjectService, pubsub *pubsub.Client) *App {
 	return &App{
 		Firestore:      fs,
 		Storage:        storage,
 		Auth:           auth,
 		ProjectService: projectService,
+		PubSub:         pubsub,
 	}
 }
 
@@ -82,6 +85,7 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 	workers.Use(middleware.GoogleOIDCMiddleware(jobsAudience, saEmail))
 	{
 		workers.POST("/delete", app.JobWorkerDeleteProject)
+		workers.POST("/build", app.JobWorkerBuildProject)
 	}
 
 	return router

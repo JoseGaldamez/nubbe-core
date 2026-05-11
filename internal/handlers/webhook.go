@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/JoseGaldamez/nubbe-core/internal/pkg/utils"
 	"github.com/gin-gonic/gin"
@@ -89,27 +91,54 @@ func (app *App) HandleCloudBuildWebhook(c *gin.Context) {
 		return
 	}
 
-	if status == "SUCCESS" && projectType == "nodejs" {
+	if status == "SUCCESS" {
 		// Lo hacemos asíncrono usando context.Background() para no bloquear la respuesta HTTP
-		// y evitar que el contexto de Gin se cancele al terminar la petición.
-		go func(subDomain string) {
+		go func(pID, pType, uID string) {
 			ctxBg := context.Background()
+			var targetURL string
+			var err error
 
-			// Obtenemos la URL del contenedor de Google
-			cloudRunURL, err := utils.FetchCloudRunURL(ctxBg, subDomain)
-			if err != nil {
-				log.Printf("[Error Crítico] No se pudo obtener la URL de Cloud Run para %s: %v", subDomain, err)
+			switch pType {
+			case "static", "react", "astro":
+				// Para proyectos estáticos en Cloudflare Pages
+				// El nombre del proyecto en CF sigue el patrón nubbe-run-[projectId]-[hash]
+				// pero para simplificar, si no tenemos el hash aquí, deberíamos haberlo guardado 
+				// o pasado en las substituciones. 
+				// Vamos a asumir que pasamos _CF_PAGES_URL en las substituciones si es posible,
+				// o que lo reconstruimos.
+				
+				// Re-calculamos el hash (primeros 6 caracteres del userID)
+				userHash := strings.ToLower(uID)
+				if len(userHash) > 6 {
+					userHash = userHash[:6]
+				}
+				safeSubDomain := pID
+				if len(safeSubDomain) > 35 {
+					safeSubDomain = safeSubDomain[:35]
+				}
+				cfProjectName := fmt.Sprintf("nubbe-run-%s-%s", safeSubDomain, userHash)
+				targetURL = fmt.Sprintf("https://%s.pages.dev", cfProjectName)
+
+			case "nodejs", "go":
+				// Para proyectos de backend en Cloud Run
+				targetURL, err = utils.FetchCloudRunURL(ctxBg, pID)
+				if err != nil {
+					log.Printf("[Error Crítico] No se pudo obtener la URL de Cloud Run para %s: %v", pID, err)
+					return
+				}
+			default:
+				log.Printf("[Build] Tipo de proyecto %s no requiere actualización de KV personalizada o es desconocido", pType)
 				return
 			}
 
-			// Lo registramos en Cloudflare
-			if err := utils.RegisterInCloudflareKV(ctxBg, subDomain, cloudRunURL); err != nil {
-				log.Printf("[Error Crítico] No se pudo registrar %s en KV: %v", subDomain, err)
+			// Lo registramos en Cloudflare KV
+			if err := utils.RegisterInCloudflareKV(ctxBg, pID, targetURL); err != nil {
+				log.Printf("[Error Crítico] No se pudo registrar %s en KV: %v", pID, err)
 				return
 			}
 
-			log.Printf("[Éxito] Enrutamiento KV configurado: %s.nubbe.run -> %s", subDomain, cloudRunURL)
-		}(projectId) // Pasamos projectId (que es el subDomain)
+			log.Printf("[Éxito] Enrutamiento KV configurado: %s.nubbe.run -> %s", pID, targetURL)
+		}(projectId, projectType, userID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})

@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"encoding/json"
+	"log"
 	"net/http"
 
-	"cloud.google.com/go/pubsub/v2"
+	"github.com/JoseGaldamez/nubbe-core/internal/pkg/pubsub"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,37 +44,26 @@ func (app *App) DeleteProjectAsync(c *gin.Context) {
 		return
 	}
 
-	// 2. Conectar a Pub/Sub y publicar la orden
-	ctx := c.Request.Context() // Es mejor usar el contexto de la petición HTTP
-	client, errClient := pubsub.NewClient(ctx, "nubbe-run")
-	if errClient != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error conectando a infraestructura de colas"})
-		return
-	}
-	// ¡CRÍTICO! Prevenir fugas de memoria cerrando el cliente al terminar
-	defer client.Close()
-
-	publisher := client.Publisher("nubbe-jobs")
-
-	payload, _ := json.Marshal(JobPayload{
+	// 2. Publish deletion job to PubSub via pre-initialized client
+	job := JobPayload{
 		Action:   "delete_project",
 		AppID:    appID,
 		RepoName: projectDetails.RepoName,
 		UserID:   userID,
-	})
+	}
 
-	// Publicar asíncronamente
-	result := publisher.Publish(ctx, &pubsub.Message{Data: payload})
-
-	_, errPubSub := result.Get(ctx)
-	if errPubSub != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Fallo al encolar la tarea de destrucción", "data": errPubSub.Error()})
+	msgID, err := app.PubSub.Publish(c.Request.Context(), pubsub.JobsTopic, job)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Fallo al encolar la tarea de destrucción", "details": err.Error()})
 		return
 	}
+
+	log.Printf("[Delete] Proyecto %s encolado para destrucción (msgID: %s)", appID, msgID)
 
 	// 3. Responder al frontend INMEDIATAMENTE
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "processing",
 		"message": "Proyecto encolado para destrucción segura en segundo plano.",
+		"msg_id":  msgID,
 	})
 }

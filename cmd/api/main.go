@@ -12,6 +12,7 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"github.com/JoseGaldamez/nubbe-core/internal/config"
 	"github.com/JoseGaldamez/nubbe-core/internal/handlers"
+	"github.com/JoseGaldamez/nubbe-core/internal/pkg/pubsub"
 	"github.com/JoseGaldamez/nubbe-core/internal/repository"
 	"github.com/JoseGaldamez/nubbe-core/internal/service"
 )
@@ -45,6 +46,11 @@ func main() {
 		log.Fatalf("Error obteniendo cliente Auth: %v", err)
 	}
 
+	psClient, err := pubsub.NewClient(ctx, cfg.GCPProjectID)
+	if err != nil {
+		log.Fatalf("Error inicializando PubSub: %v", err)
+	}
+
 	log.Println("Infraestructura inicializada correctamente")
 
 	// 3. Initialize Repositories and Services
@@ -53,7 +59,7 @@ func main() {
 	projectService := service.NewProjectService(userRepo, projectRepo, cfg.AESEncryptionKey)
 
 	// 4. Setup Application and Router
-	appDeps := handlers.NewApp(fsClient, storageClient, authClient, projectService)
+	appDeps := handlers.NewApp(fsClient, storageClient, authClient, projectService, psClient)
 	router := appDeps.InitRouter(cfg.WebhookAudience, cfg.PubSubServiceAccountEmail, cfg.JobsAudience)
 
 	// 5. Start Server with Graceful Shutdown support
@@ -69,27 +75,48 @@ func main() {
 		}
 	}()
 
-	// Start PubSub Subscriber
-	go handlers.StartPubSubSubscriber(cfg.GCPProjectID)
-
 	// 6. Signal Handling
 	quit := make(chan os.Signal, 1)
+	// SIGINT (Ctrl+C), SIGTERM (Docker/K8s termination)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Iniciando apagado ordenado...")
+	
+	sig := <-quit
+	log.Printf("Señal recibida: %v. Iniciando apagado ordenado...", sig)
 
-	ctxShutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Contexto con timeout para el apagado (darle tiempo a peticiones activas)
+	ctxShutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctxShutdown); err != nil {
-		log.Fatalf("Apagado forzado del servidor: %v", err)
+		log.Printf("Error durante el apagado del servidor: %v", err)
 	}
 
-	log.Println("Esperando tareas en segundo plano...")
-	appDeps.WG.Wait()
+	log.Println("Servidor HTTP detenido. Esperando finalización de tareas asíncronas (WaitGroup)...")
+	
+	// Canal para esperar el WaitGroup con timeout
+	waitFinished := make(chan struct{})
+	go func() {
+		appDeps.WG.Wait()
+		close(waitFinished)
+	}()
 
-	fsClient.Close()
-	storageClient.Close()
+	select {
+	case <-waitFinished:
+		log.Println("Todas las tareas asíncronas han finalizado.")
+	case <-ctxShutdown.Done():
+		log.Println("Timeout alcanzado esperando tareas asíncronas. Forzando cierre.")
+	}
+
+	// Cerrar clientes de infraestructura
+	if err := fsClient.Close(); err != nil {
+		log.Printf("Error cerrando Firestore: %v", err)
+	}
+	if err := storageClient.Close(); err != nil {
+		log.Printf("Error cerrando Storage: %v", err)
+	}
+	if err := psClient.Close(); err != nil {
+		log.Printf("Error cerrando PubSub: %v", err)
+	}
 
 	log.Println("Nubbe Core se ha detenido correctamente.")
 }

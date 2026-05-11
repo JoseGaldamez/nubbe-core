@@ -9,6 +9,7 @@ import (
 )
 
 type ProjectRepository interface {
+	CreateProject(ctx context.Context, userID string, details *ProjectDetails) error
 	UpdateBuildStatus(ctx context.Context, userID, projectID, buildID, status, logURL, message string) error
 	UpdateProjectStatus(ctx context.Context, userID, projectID, status string) error
 	GetProjectData(ctx context.Context, userID, projectID string) (map[string]interface{}, error)
@@ -16,6 +17,14 @@ type ProjectRepository interface {
 	SaveProjectVars(ctx context.Context, userID, projectID string, encryptedVars interface{}) error
 	GetProjectVars(ctx context.Context, userID, projectID string) (string, error)
 	DeleteProject(ctx context.Context, userID, projectID string) error
+}
+
+func (r *firestoreProjectRepo) CreateProject(ctx context.Context, userID string, details *ProjectDetails) error {
+	_, err := r.client.Collection("users").Doc(userID).Collection("projects").Doc(details.Subdomain).Set(ctx, details)
+	if err != nil {
+		return fmt.Errorf("failed to create project in firestore: %w", err)
+	}
+	return nil
 }
 
 func (r *firestoreProjectRepo) SaveProjectVars(ctx context.Context, userID, projectID string, encryptedVars interface{}) error {
@@ -51,12 +60,39 @@ func (r *firestoreProjectRepo) GetProjectVars(ctx context.Context, userID, proje
 	return str, nil
 }
 
+type RepositoryConfig struct {
+	URL    string `firestore:"url" json:"url"`
+	Branch string `firestore:"branch" json:"branch"`
+}
+
+type BuildConfig struct {
+	Target         string            `firestore:"target" json:"target"`
+	Runtime        string            `firestore:"runtime" json:"runtime"`
+	RuntimeVersion string            `firestore:"runtime_version" json:"runtime_version"`
+	BuildCommand   string            `firestore:"build_command" json:"build_command"`
+	RunCommand     string            `firestore:"run_command" json:"run_command"`
+	DistDirectory  string            `firestore:"dist_directory" json:"dist_directory"`
+	EntryPoint     string            `firestore:"entry_point" json:"entry_point"` // Manteniendo compatibilidad
+}
+
+type ProjectStatus struct {
+	State             string `firestore:"state" json:"state"`
+	CurrentURL        string `firestore:"current_url" json:"current_url"`
+	LastDeploymentSHA string `firestore:"last_deployment_sha" json:"last_deployment_sha"`
+}
+
 type ProjectDetails struct {
-	Branch         string            `firestore:"branch"`
-	RepoName       string            `firestore:"repo_name"`
-	ProjectType    string            `firestore:"project_type"`
-	EntryPoint     string            `firestore:"entry_point"`
-	AdvancedConfig map[string]string `firestore:"advanced_config"`
+	ProjectID   string           `firestore:"project_id" json:"project_id"`
+	Subdomain   string           `firestore:"subdomain" json:"subdomain"`
+	OwnerID     string           `firestore:"owner_id" json:"owner_id"`
+	Repository  RepositoryConfig `firestore:"repository" json:"repository"`
+	BuildConfig BuildConfig      `firestore:"build_config" json:"build_config"`
+	Status      ProjectStatus    `firestore:"status" json:"status"`
+
+	// Campos para compatibilidad con código existente durante la migración
+	RepoName       string            `firestore:"repo_name" json:"repo_name"`
+	ProjectType    string            `firestore:"project_type" json:"project_type"`
+	AdvancedConfig map[string]string `firestore:"advanced_config" json:"advanced_config"`
 }
 
 type firestoreProjectRepo struct {
@@ -69,7 +105,7 @@ func NewProjectRepository(client *firestore.Client) ProjectRepository {
 
 func (r *firestoreProjectRepo) UpdateProjectStatus(ctx context.Context, userID, projectID, status string) error {
 	_, err := r.client.Collection("users").Doc(userID).Collection("projects").Doc(projectID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: status},
+		{Path: "status.state", Value: status},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update project status: %w", err)
@@ -117,7 +153,7 @@ func (r *firestoreProjectRepo) UpdateBuildStatus(ctx context.Context, userID, pr
 		Collection("projects").Doc(projectID)
 
 	batch.Update(projectRef, []firestore.Update{
-		{Path: "status", Value: status},
+		{Path: "status.state", Value: status},
 		{Path: "updatedAt", Value: now},
 	})
 

@@ -55,6 +55,13 @@ func (service *ProjectService) TriggerBuild(ctx context.Context, userID, subDoma
 	return result, nil
 }
 
+func (service *ProjectService) CreateProject(ctx context.Context, userID string, details *repository.ProjectDetails) error {
+	if err := service.projectRepo.CreateProject(ctx, userID, details); err != nil {
+		return fmt.Errorf("service failed to create project: %w", err)
+	}
+	return nil
+}
+
 func (service *ProjectService) GetUserToken(ctx context.Context, userID string) (string, error) {
 	token, err := service.userRepo.GetGithubToken(ctx, userID)
 	if err != nil {
@@ -126,7 +133,11 @@ func (service *ProjectService) GetProjectVars(ctx context.Context, userID, proje
 	return vars, nil
 }
 
-func (service *ProjectService) RegisterGitHubWebhook(ctx context.Context, userID, projectID, repoName, token string) error {
+func (service *ProjectService) GetAESKey() string {
+	return service.aesKey
+}
+
+func (service *ProjectService) RegisterGitHubWebhook(ctx context.Context, userID, projectID, repoName, token, secret string) error {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/hooks", repoName)
 	payloadURL := fmt.Sprintf("https://api.nubbe.run/webhooks/github?uid=%s&pid=%s", userID, projectID)
 
@@ -138,6 +149,7 @@ func (service *ProjectService) RegisterGitHubWebhook(ctx context.Context, userID
 			"url":          payloadURL,
 			"content_type": "json",
 			"insecure_ssl": "0",
+			"secret":       secret,
 		},
 	}
 

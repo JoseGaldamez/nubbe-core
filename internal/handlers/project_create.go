@@ -7,6 +7,7 @@ import (
 
 	"time"
 
+	"github.com/JoseGaldamez/nubbe-core/internal/repository"
 	"github.com/gin-gonic/gin"
 )
 
@@ -54,6 +55,44 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 		return
 	}
 
+	// 1.1 Generate or use a secret for Webhook Signature Validation
+	webhookSecret := app.ProjectService.GetAESKey()
+
+	// 1.2 Create Project in Firestore (Capa de Datos)
+	projectDetails := &repository.ProjectDetails{
+		ProjectID: req.SubDomain, // Usando subdomain como ID por ahora
+		Subdomain: req.SubDomain,
+		OwnerID:   userID,
+		Repository: repository.RepositoryConfig{
+			URL:    "https://github.com/" + req.RepoName,
+			Branch: req.Branch,
+		},
+		BuildConfig: repository.BuildConfig{
+			Target:         "CLOUD_RUN", // Default o basado en type
+			Runtime:        req.ProjectType,
+			BuildCommand:   req.AdvancedConfig["build_command"],
+			RunCommand:     req.AdvancedConfig["run_command"],
+			DistDirectory:  req.AdvancedConfig["dist_directory"],
+			EntryPoint:     req.EntryPoint,
+		},
+		Status: repository.ProjectStatus{
+			State: "BUILDING",
+		},
+		// Compatibilidad
+		RepoName:       req.RepoName,
+		ProjectType:    req.ProjectType,
+		AdvancedConfig: req.AdvancedConfig,
+	}
+
+	if req.ProjectType == "static" || req.ProjectType == "react" || req.ProjectType == "astro" {
+		projectDetails.BuildConfig.Target = "CLOUDFLARE_PAGES"
+	}
+
+	if err := app.ProjectService.CreateProject(ctx.Request.Context(), userID, projectDetails); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create project record", "details": err.Error()})
+		return
+	}
+
 	// 2. Save Env Vars (Optimized: Null if empty)
 	if err := app.ProjectService.SaveProjectVars(ctx.Request.Context(), userID, req.SubDomain, req.EnvVars); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save environment variables", "details": err.Error()})
@@ -62,26 +101,39 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 
 	// 3. Register GitHub Webhook Async via Service
 	app.WG.Add(1)
-	go func(uID, pID, rName, t string) {
+	go func(uID, pID, rName, t, secret string) {
 		defer app.WG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := app.ProjectService.RegisterGitHubWebhook(ctx, uID, pID, rName, t); err != nil {
+		if err := app.ProjectService.RegisterGitHubWebhook(ctx, uID, pID, rName, t, secret); err != nil {
 			log.Printf("Warning: Failed to register GitHub Webhook for project %s: %v", pID, err)
 		}
-	}(userID, req.SubDomain, req.RepoName, token)
+	}(userID, req.SubDomain, req.RepoName, token, webhookSecret)
 
-	// 4. Trigger Initial Cloud Build via Service
-	info, err := app.ProjectService.TriggerBuild(ctx.Request.Context(), userID, req.SubDomain, req.RepoName, req.ProjectType, token, req.EntryPoint, req.EnvVars, req.AdvancedConfig)
+	// 4. Publish Build Event to PubSub
+	buildEvent := map[string]interface{}{
+		"user_id":         userID,
+		"project_id":      req.SubDomain,
+		"repo_name":       req.RepoName,
+		"project_type":    req.ProjectType,
+		"github_token":    token,
+		"entry_point":     req.EntryPoint,
+		"env_vars":        req.EnvVars,
+		"advanced_config": req.AdvancedConfig,
+		"action":          "INITIAL_BUILD",
+		"webhook_secret":  webhookSecret,
+		"branch":          req.Branch,
+	}
+
+	msgID, err := app.PubSub.PublishBuildEvent(ctx.Request.Context(), buildEvent)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to trigger build", "details": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue build event", "details": err.Error()})
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"message":      "Project created and deployment started successfully",
-		"build_id":     info.BuildID,
-		"build_status": info.Status,
-		"operation_id": info.OperationName,
+		"message":      "Project created and deployment queued successfully",
+		"subdomain":    req.SubDomain,
+		"pubsub_msg_id": msgID,
 	})
 }

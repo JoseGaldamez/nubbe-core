@@ -131,15 +131,6 @@ EOF
 		return nil, fmt.Errorf("fallo al disparar cloudbuild: %w", err)
 	}
 
-	kvNamespaceID := os.Getenv("CLOUDFLARE_KV_NAMESPACE_ID")
-	if kvNamespaceID != "" {
-		// Esta es la función registerRouteInKV que definimos anteriormente
-		errKV := b.registerRouteInKV(ctx, cfAccountID, cfAPIToken, kvNamespaceID, config.SubDomain, cfProjectName)
-		if errKV != nil {
-			fmt.Printf("[Advertencia KV] No se pudo registrar la ruta %s.nubbe.run: %v\n", cfProjectName, errKV)
-		}
-	}
-
 	var buildMeta cloudbuild.BuildOperationMetadata
 	json.Unmarshal(resp.Metadata, &buildMeta)
 
