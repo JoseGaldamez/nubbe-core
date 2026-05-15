@@ -99,15 +99,8 @@ func (app *App) HandleCloudBuildWebhook(c *gin.Context) {
 			var err error
 
 			switch pType {
-			case "static", "react", "astro":
-				// Para proyectos estáticos en Cloudflare Pages
-				// El nombre del proyecto en CF sigue el patrón nubbe-run-[projectId]-[hash]
-				// pero para simplificar, si no tenemos el hash aquí, deberíamos haberlo guardado 
-				// o pasado en las substituciones. 
-				// Vamos a asumir que pasamos _CF_PAGES_URL en las substituciones si es posible,
-				// o que lo reconstruimos.
-				
-				// Re-calculamos el hash (primeros 6 caracteres del userID)
+			case "static", "react", "astro", "vue", "angular":
+				// Para proyectos frontend estáticos en Cloudflare Pages
 				userHash := strings.ToLower(uID)
 				if len(userHash) > 6 {
 					userHash = userHash[:6]
@@ -119,8 +112,8 @@ func (app *App) HandleCloudBuildWebhook(c *gin.Context) {
 				cfProjectName := fmt.Sprintf("nubbe-run-%s-%s", safeSubDomain, userHash)
 				targetURL = fmt.Sprintf("https://%s.pages.dev", cfProjectName)
 
-			case "nodejs", "go":
-				// Para proyectos de backend en Cloud Run
+			case "nodejs", "nextjs", "python", "flask", "streamlit", "go":
+				// Para proyectos de backend/SSR en Cloud Run
 				targetURL, err = utils.FetchCloudRunURL(ctxBg, pID)
 				if err != nil {
 					log.Printf("[Error Crítico] No se pudo obtener la URL de Cloud Run para %s: %v", pID, err)

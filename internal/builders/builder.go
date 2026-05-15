@@ -33,14 +33,28 @@ type Builder interface {
 // GetBuilderByType es la fábrica que devuelve la estrategia de construcción adecuada.
 func GetBuilderByType(projectType string) (Builder, error) {
 	switch projectType {
+	// --- Frontend (Cloudflare Pages) ---
 	case "react":
 		return NewReactBuilder(), nil
 	case "static":
 		return NewStaticBuilder(), nil
 	case "astro":
 		return NewAstroBuilder(), nil
+	case "vue":
+		return NewVueBuilder(), nil
+	case "angular":
+		return NewAngularBuilder(), nil
+
+	// --- Backend / SSR (Cloud Run) ---
 	case "nodejs":
 		return NewNodejsBuilder(), nil
+	case "nextjs":
+		return NewNextjsBuilder(), nil
+	case "python", "flask", "streamlit":
+		return NewPythonBuilder(), nil
+	case "go":
+		return NewGoBuilder(), nil
+
 	default:
 		return nil, fmt.Errorf("tipo de proyecto no soportado para el nuevo flujo: %s", projectType)
 	}

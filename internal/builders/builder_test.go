@@ -9,12 +9,26 @@ func TestGetBuilderByType(t *testing.T) {
 		projectType string
 		wantErr     bool
 	}{
+		// Frontend (Cloudflare Pages)
 		{"react", false},
 		{"static", false},
 		{"astro", false},
+		{"vue", false},
+		{"angular", false},
+
+		// Backend / SSR (Cloud Run)
 		{"nodejs", false},
+		{"nextjs", false},
+		{"python", false},
+		{"flask", false},
+		{"streamlit", false},
+		{"go", false},
+
+		// Invalid
 		{"unknown", true},
 		{"", true},
+		{"ruby", true},
+		{"java", true},
 	}
 
 	for _, tt := range tests {

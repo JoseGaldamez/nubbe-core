@@ -13,8 +13,8 @@ import (
 
 // CreateProjectRequest defines the structure for the incoming project creation payload.
 type CreateProjectRequest struct {
-	ProjectType    string            `json:"project_type" binding:"required,oneof=static react nodejs astro go"`
-	EntryPoint     string            `json:"entry_point" binding:"required"`
+	ProjectType    string            `json:"project_type" binding:"required,oneof=static react nodejs astro go vue angular nextjs python flask streamlit"`
+	EntryPoint     string            `json:"entry_point"`
 	RepoName       string            `json:"repo_name" binding:"required"`
 	Title          string            `json:"title" binding:"required"`
 	SubDomain      string            `json:"sub_domain" binding:"required"`
@@ -84,8 +84,11 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 		AdvancedConfig: req.AdvancedConfig,
 	}
 
-	if req.ProjectType == "static" || req.ProjectType == "react" || req.ProjectType == "astro" {
+	switch req.ProjectType {
+	case "static", "react", "astro", "vue", "angular":
 		projectDetails.BuildConfig.Target = "CLOUDFLARE_PAGES"
+	case "nodejs", "nextjs", "python", "flask", "streamlit", "go":
+		projectDetails.BuildConfig.Target = "CLOUD_RUN"
 	}
 
 	if err := app.ProjectService.CreateProject(ctx.Request.Context(), userID, projectDetails); err != nil {

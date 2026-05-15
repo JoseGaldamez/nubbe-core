@@ -4,11 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"strings"
-	"time"
 
 	"google.golang.org/api/cloudbuild/v1"
 )
@@ -24,11 +20,9 @@ func NewStaticBuilder() *StaticBuilder {
 }
 
 func (b *StaticBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildResult, error) {
-	cfAccountID := os.Getenv("CLOUDFLARE_ACCOUNT_ID")
-	cfAPIToken := os.Getenv("CLOUDFLARE_API_TOKEN")
-
-	if cfAccountID == "" || cfAPIToken == "" {
-		return nil, fmt.Errorf("faltan credenciales de Cloudflare (ACCOUNT_ID/API_TOKEN)")
+	cfAccountID, cfAPIToken, kvNamespaceID, err := GetCloudflareCredentials()
+	if err != nil {
+		return nil, err
 	}
 
 	branch := config.AdvancedConfig["branch"]
@@ -43,26 +37,23 @@ func (b *StaticBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 
 	errorPage := config.AdvancedConfig["error_page"]
 
-	userHash := strings.ToLower(config.UserID)
-	if len(userHash) > 6 {
-		userHash = userHash[:6]
-	}
+	// 1. Generar nombre de proyecto para Cloudflare Pages
+	cfProjectName := GenerateCFProjectName(config.SubDomain, config.UserID)
 
-	safeSubDomain := config.SubDomain
-	if len(safeSubDomain) > 35 {
-		safeSubDomain = safeSubDomain[:35]
-	}
-
-	cfProjectName := fmt.Sprintf("nubbe-run-%s-%s", safeSubDomain, userHash)
-
-	// 1. Asegurar la existencia del proyecto en CF (Ligero y rápido en Go)
-	if err := b.ensureCloudflareProject(ctx, cfAccountID, cfAPIToken, cfProjectName, branch); err != nil {
+	// 2. Asegurar la existencia del proyecto en CF
+	if err := EnsureCloudflareProject(ctx, cfAccountID, cfAPIToken, cfProjectName, branch); err != nil {
 		return nil, fmt.Errorf("error asegurando proyecto en Cloudflare: %w", err)
 	}
 
-	// 2. Preparar el script Bash que se ejecutará en Cloud Build para manejar el 404
-	fallback404Html := `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>404 - No Encontrado</title><style>body{background-color:#111;color:#fff;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}h1{color:#67e8f9;margin-bottom:8px;}p{color:#9ca3af;}</style></head><body><div><h1>404</h1><p>Esta página no pudo ser encontrada.</p><p style="font-size:1rem;margin-top:24px;color:#4b5563;">Desplegado en <span style="color:#ffffff;font-weight:700;">nubbe<span style="color:#00e5ff;">.run</span></span></p></div></body></html>`
+	// 3. Registrar en KV
+	if kvNamespaceID != "" {
+		errKV := RegisterRouteInKV(ctx, cfAccountID, cfAPIToken, kvNamespaceID, config.SubDomain, cfProjectName)
+		if errKV != nil {
+			fmt.Printf("[Advertencia KV] No se pudo registrar la ruta: %v\n", errKV)
+		}
+	}
 
+	// 4. Preparar el script Bash para manejar el 404
 	bashScript404 := fmt.Sprintf(`
 	if [ -n "%s" ] && [ -f "%s" ]; then
 		echo "Moviendo error_page personalizado a 404.html..."
@@ -73,9 +64,9 @@ func (b *StaticBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 %s
 EOF
 	fi
-	`, errorPage, errorPage, errorPage, entryPoint, entryPoint, entryPoint, fallback404Html)
+	`, errorPage, errorPage, errorPage, entryPoint, entryPoint, entryPoint, Nubbe404HTML())
 
-	// 3. Orquestar el Job en Cloud Build
+	// 5. Orquestar el Job en Cloud Build
 	cbService, err := cloudbuild.NewService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fallo al inicializar servicio de cloudbuild: %w", err)
@@ -94,13 +85,11 @@ EOF
 			"_GH_TOKEN":     config.GithubToken,
 		},
 		Steps: []*cloudbuild.BuildStep{
-			// Paso 1: Clonar el repositorio
 			{
 				Name:       "gcr.io/cloud-builders/git",
 				Entrypoint: "bash",
 				Args:       []string{"-c", "git clone --branch $_BRANCH https://x-access-token:$_GH_TOKEN@github.com/$_REPO_NAME.git ."},
 			},
-			// Paso 2: Preparar la estructura y el archivo 404.html
 			{
 				Name: "ubuntu",
 				Args: []string{"bash", "-c", bashScript404},
@@ -110,7 +99,6 @@ EOF
 					"IGNORE_TYPE=$_PROJECT_TYPE",
 				},
 			},
-			// Paso 3: Desplegar usando Wrangler en una imagen Node oficial
 			{
 				Name:       "node:20-slim",
 				Entrypoint: "bash",
@@ -125,7 +113,7 @@ EOF
 		},
 	}
 
-	// 4. Disparar el Build
+	// 6. Disparar el Build
 	resp, err := cbService.Projects.Builds.Create(b.projectID, buildObj).Do()
 	if err != nil {
 		return nil, fmt.Errorf("fallo al disparar cloudbuild: %w", err)
@@ -144,75 +132,4 @@ EOF
 	}
 
 	return result, nil
-}
-
-// ensureCloudflareProject verifica y crea el proyecto en CF para evitar el error 404 de Wrangler
-func (b *StaticBuilder) ensureCloudflareProject(ctx context.Context, accountID, token, projectName, branch string) error {
-	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/pages/projects", accountID)
-
-	payload := fmt.Sprintf(`{"name": "%s", "production_branch": "%s"}`, projectName, branch)
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// 200 OK: El proyecto no existía y se creó exitosamente
-	if resp.StatusCode == http.StatusOK {
-		return nil
-	}
-
-	// 409 Conflict: El proyecto ya existe (Error 8000002 de Cloudflare).
-	// Esto es el comportamiento esperado en un redespliegue, así que lo damos por válido.
-	if resp.StatusCode == http.StatusConflict {
-		return nil
-	}
-
-	// Cualquier otro código (401, 403, 500...) sí es un error real que debemos reportar
-	respBody, _ := io.ReadAll(resp.Body)
-	return fmt.Errorf("respuesta inesperada API CF (%d): %s", resp.StatusCode, string(respBody))
-}
-
-// registerRouteInKV guarda el mapeo del subdominio hacia el proyecto de Cloudflare Pages en KV
-func (b *StaticBuilder) registerRouteInKV(ctx context.Context, accountID, token, kvNamespaceID, subDomain, cfProjectName string) error {
-	// La clave (key) será el subdominio completo: mi-proyecto.nubbe.run
-	key := fmt.Sprintf("%s.nubbe.run", subDomain)
-
-	// El valor (value) será el destino real en Pages
-	value := fmt.Sprintf("https://%s.pages.dev", cfProjectName)
-
-	// La URL de la API de Cloudflare para escribir un par clave-valor (PUT)
-	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s/values/%s",
-		accountID, kvNamespaceID, key)
-
-	req, err := http.NewRequestWithContext(ctx, "PUT", apiURL, strings.NewReader(value))
-	if err != nil {
-		return fmt.Errorf("error creando petición KV: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-	// Para KV, el body se envía como texto plano si es solo un string
-	req.Header.Set("Content-Type", "text/plain")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("error ejecutando petición KV: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("Cloudflare KV API respondió con error (%d): %s", resp.StatusCode, string(respBody))
-	}
-
-	return nil
 }
