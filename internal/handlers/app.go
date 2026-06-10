@@ -62,6 +62,8 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 		c.JSON(200, gin.H{"status": "operational", "system": "nubbe-core"})
 	})
 
+	router.GET("/debug/pubsub", app.DebugPubSub)
+
 	// Grupo de rutas para la API interna
 	api := router.Group("/api/v1")
 	api.Use(middleware.FirebaseAuthMiddleware(app.Auth))
