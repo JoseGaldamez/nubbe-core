@@ -136,6 +136,7 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 		Status: repository.ProjectStatus{
 			State: "BUILDING",
 		},
+		CreatedAt: time.Now().Format(time.RFC3339),
 		// Compatibilidad
 		RepoName:       req.RepoName,
 		ProjectType:    req.ProjectType,

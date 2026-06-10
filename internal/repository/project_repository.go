@@ -89,6 +89,7 @@ type ProjectDetails struct {
 	Repository  RepositoryConfig `firestore:"repository" json:"repository"`
 	BuildConfig BuildConfig      `firestore:"build_config" json:"build_config"`
 	Status      ProjectStatus    `firestore:"status" json:"status"`
+	CreatedAt   string           `firestore:"createdAt,omitempty" json:"createdAt,omitempty"`
 
 	// Campos para compatibilidad con código existente durante la migración
 	RepoName       string            `firestore:"repo_name" json:"repo_name"`
