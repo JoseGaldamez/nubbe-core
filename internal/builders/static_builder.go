@@ -55,16 +55,18 @@ func (b *StaticBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 
 	// 4. Preparar el script Bash para manejar el 404
 	bashScript404 := fmt.Sprintf(`
-	if [ -n "%s" ] && [ -f "%s" ]; then
-		echo "Moviendo error_page personalizado a 404.html..."
-		mv "%s" "%s/404.html"
-	elif [ ! -f "%s/404.html" ]; then
+	if [ -n "%[1]s" ] && [ -f "%[1]s" ]; then
+		if [ ! "%[1]s" -ef "%[2]s/404.html" ]; then
+			echo "Moviendo error_page personalizado a 404.html..."
+			mv "%[1]s" "%[2]s/404.html"
+		fi
+	elif [ ! -f "%[2]s/404.html" ]; then
 		echo "Generando 404.html de Nubbe.run..."
-		cat << 'EOF' > "%s/404.html"
-%s
+		cat << 'EOF' > "%[2]s/404.html"
+%[3]s
 EOF
 	fi
-	`, errorPage, errorPage, errorPage, entryPoint, entryPoint, entryPoint, Nubbe404HTML())
+	`, errorPage, entryPoint, Nubbe404HTML())
 
 	// 5. Orquestar el Job en Cloud Build
 	cbService, err := cloudbuild.NewService(ctx)
