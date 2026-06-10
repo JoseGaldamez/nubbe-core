@@ -226,3 +226,50 @@ func DeleteCloudflareProject(ctx context.Context, accountID, token, projectName 
 	return fmt.Errorf("respuesta inesperada API CF al borrar proyecto (%d): %s", resp.StatusCode, string(respBody))
 }
 
+// GetRouteInKV obtiene el valor (el destino URL) del mapeo del subdominio en Cloudflare KV.
+func GetRouteInKV(ctx context.Context, accountID, token, kvNamespaceID, subDomain string) (string, error) {
+	key := fmt.Sprintf("%s.nubbe.run", subDomain)
+	apiURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s/values/%s",
+		accountID, kvNamespaceID, key)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("error creando petición GET KV: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error ejecutando petición GET KV: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		valBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("error leyendo respuesta GET KV: %w", err)
+		}
+		return string(valBytes), nil
+	} else if resp.StatusCode == http.StatusNotFound {
+		return "", nil // No existe
+	}
+
+	respBody, _ := io.ReadAll(resp.Body)
+	return "", fmt.Errorf("Cloudflare KV API respondió con error (%d): %s", resp.StatusCode, string(respBody))
+}
+
+// ExtractPagesProjectName extrae el nombre del proyecto de Cloudflare Pages a partir de la URL de destino de KV.
+// Ejemplo: "https://nubbe-run-garinagu-pgjdoy.pages.dev" -> "nubbe-run-garinagu-pgjdoy"
+func ExtractPagesProjectName(kvValue string) string {
+	cleaned := kvValue
+	cleaned = strings.TrimPrefix(cleaned, "https://")
+	cleaned = strings.TrimPrefix(cleaned, "http://")
+	if idx := strings.Index(cleaned, ".pages.dev"); idx != -1 {
+		return cleaned[:idx]
+	}
+	return cleaned
+}
+
+

@@ -106,7 +106,10 @@ func (app *App) JobWorkerDeleteProject(c *gin.Context) {
 		if isCFPages {
 			cfAccountID, cfToken, _, cfErr := builders.GetCloudflareCredentials()
 			if cfErr == nil && cfAccountID != "" && cfToken != "" {
-				cfProjectName := builders.GenerateCFProjectName(job.AppID, job.UserID)
+				cfProjectName := job.PagesProjectName
+				if cfProjectName == "" {
+					cfProjectName = builders.GenerateCFProjectName(job.AppID, job.UserID)
+				}
 				log.Printf("[Worker] Solicitando destrucción de Cloudflare Pages: %s", cfProjectName)
 				if errCF := builders.DeleteCloudflareProject(c.Request.Context(), cfAccountID, cfToken, cfProjectName); errCF != nil {
 					log.Printf("[Worker] Advertencia borrando Cloudflare Pages %s: %v", cfProjectName, errCF)
