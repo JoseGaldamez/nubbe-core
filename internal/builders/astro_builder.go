@@ -58,6 +58,7 @@ echo "=== Verificando Archivos Esenciales ==="
 if [ ! -f "%s/404.html" ]; then
     echo "Archivo 404.html no encontrado en la salida de Astro."
     echo "Creando página 404 por defecto de Nubbe.run..."
+    mkdir -p "%s"
     cat << 'EOF' > %s/404.html
 %s
 EOF
@@ -65,7 +66,7 @@ fi
 
 echo "=== Desplegando Astro a la red Edge ==="
 npx --yes wrangler pages deploy %s --project-name $_SUB_DOMAIN --branch $_BRANCH
-`, buildDir, buildDir, Nubbe404HTML(), buildDir)
+`, buildDir, buildDir, buildDir, Nubbe404HTML(), buildDir)
 
 	// 5. Orquestar Cloud Build
 	cbService, err := cloudbuild.NewService(ctx)

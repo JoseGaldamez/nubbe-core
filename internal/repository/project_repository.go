@@ -130,9 +130,11 @@ func NewProjectRepository(client *firestore.Client) ProjectRepository {
 }
 
 func (r *firestoreProjectRepo) UpdateProjectStatus(ctx context.Context, userID, projectID, status string) error {
-	_, err := r.client.Collection("users").Doc(userID).Collection("projects").Doc(projectID).Update(ctx, []firestore.Update{
-		{Path: "status.state", Value: status},
-	})
+	_, err := r.client.Collection("users").Doc(userID).Collection("projects").Doc(projectID).Set(ctx, map[string]interface{}{
+		"status": map[string]interface{}{
+			"state": status,
+		},
+	}, firestore.MergeAll)
 	if err != nil {
 		return fmt.Errorf("failed to update project status: %w", err)
 	}
@@ -146,7 +148,53 @@ func (r *firestoreProjectRepo) GetProjectDetails(ctx context.Context, userID, pr
 	}
 	var details ProjectDetails
 	if err := doc.DataTo(&details); err != nil {
-		return nil, fmt.Errorf("failed to parse project details: %w", err)
+		// Fallback: Parsear manualmente para tolerar inconsistencias de esquemas anteriores (status String vs Map)
+		data := doc.Data()
+		if data == nil {
+			return nil, fmt.Errorf("failed to parse details: document is empty: %w", err)
+		}
+		
+		details.ProjectID, _ = data["project_id"].(string)
+		details.Subdomain, _ = data["subdomain"].(string)
+		details.Title, _ = data["title"].(string)
+		details.OwnerID, _ = data["owner_id"].(string)
+		details.RepoName, _ = data["repo_name"].(string)
+		details.ProjectType, _ = data["project_type"].(string)
+		details.CreatedAt, _ = data["createdAt"].(string)
+
+		if repoMap, ok := data["repository"].(map[string]interface{}); ok {
+			details.Repository.URL, _ = repoMap["url"].(string)
+			details.Repository.Branch, _ = repoMap["branch"].(string)
+		}
+
+		if bcMap, ok := data["build_config"].(map[string]interface{}); ok {
+			details.BuildConfig.Target, _ = bcMap["target"].(string)
+			details.BuildConfig.Runtime, _ = bcMap["runtime"].(string)
+			details.BuildConfig.RuntimeVersion, _ = bcMap["runtime_version"].(string)
+			details.BuildConfig.BuildCommand, _ = bcMap["build_command"].(string)
+			details.BuildConfig.RunCommand, _ = bcMap["run_command"].(string)
+			details.BuildConfig.DistDirectory, _ = bcMap["dist_directory"].(string)
+			details.BuildConfig.EntryPoint, _ = bcMap["entry_point"].(string)
+		}
+
+		if statusVal, exists := data["status"]; exists {
+			if statusStr, ok := statusVal.(string); ok {
+				details.Status.State = statusStr
+			} else if statusMap, ok := statusVal.(map[string]interface{}); ok {
+				details.Status.State, _ = statusMap["state"].(string)
+				details.Status.CurrentURL, _ = statusMap["current_url"].(string)
+				details.Status.LastDeploymentSHA, _ = statusMap["last_deployment_sha"].(string)
+			}
+		}
+
+		if advMap, ok := data["advanced_config"].(map[string]interface{}); ok {
+			details.AdvancedConfig = make(map[string]string)
+			for k, v := range advMap {
+				if strVal, ok := v.(string); ok {
+					details.AdvancedConfig[k] = strVal
+				}
+			}
+		}
 	}
 	return &details, nil
 }
@@ -178,10 +226,12 @@ func (r *firestoreProjectRepo) UpdateBuildStatus(ctx context.Context, userID, pr
 	projectRef := r.client.Collection("users").Doc(userID).
 		Collection("projects").Doc(projectID)
 
-	batch.Update(projectRef, []firestore.Update{
-		{Path: "status.state", Value: status},
-		{Path: "updatedAt", Value: now},
-	})
+	batch.Set(projectRef, map[string]interface{}{
+		"status": map[string]interface{}{
+			"state": status,
+		},
+		"updatedAt": now,
+	}, firestore.MergeAll)
 
 	// Ejecutar ambas operaciones de forma atómica
 	if _, err := batch.Commit(ctx); err != nil {

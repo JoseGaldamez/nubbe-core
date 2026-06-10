@@ -169,7 +169,13 @@ if [ -f "bun.lockb" ]; then
 elif [ -f "pnpm-lock.yaml" ]; then
     echo "pnpm detectado (pnpm-lock.yaml). Activando corepack..."
     corepack enable pnpm
-    pnpm install
+    # pnpm v10+ requiere aprobación de scripts de compilación de dependencias en CI
+    if pnpm install --dangerously-allow-all-builds; then
+        echo "Dependencias de pnpm instaladas con éxito."
+    else
+        echo "Reintentando pnpm install estándar..."
+        pnpm install
+    fi
     pnpm run build
 
 elif [ -f "yarn.lock" ]; then
