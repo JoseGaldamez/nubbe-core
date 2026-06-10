@@ -108,7 +108,7 @@ npx --yes wrangler pages deploy $BUILD_DIR --project-name $_SUB_DOMAIN --branch 
 				Args:       []string{"-c", "git clone --branch $_BRANCH https://x-access-token:$_GH_TOKEN@github.com/$_REPO_NAME.git ."},
 			},
 			{
-				Name:       "node:22",
+				Name:       "node:lts",
 				Entrypoint: "bash",
 				Args:       []string{"-c", angularBuildScript},
 				Env: []string{

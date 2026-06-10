@@ -11,8 +11,6 @@ import (
 )
 
 // NextjsBuilder maneja el despliegue de proyectos Next.js (SSR) a Cloud Run.
-// Next.js requiere un servidor Node.js para funcionar en modo SSR,
-// por lo que se despliega como contenedor en Cloud Run.
 type NextjsBuilder struct {
 	projectID string
 }
@@ -45,65 +43,12 @@ func (b *NextjsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 
 	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", b.projectID, serviceName)
 
-	// Script que genera un Dockerfile dinámico para Next.js si no existe uno
-	nextjsSetupScript := fmt.Sprintf(`
-echo "=== Preparando Next.js para Cloud Run ==="
-
-if [ -f "Dockerfile" ]; then
-    echo "✅ Dockerfile detectado. Se usará tal cual."
-else
-    echo "⚠️ Dockerfile no encontrado. Generando Dockerfile optimizado para Next.js..."
-
-    # Detectar gestor de paquetes para el Dockerfile
-    PKG_MANAGER="npm"
-    INSTALL_CMD="npm ci"
-    if [ -f "pnpm-lock.yaml" ]; then
-        PKG_MANAGER="pnpm"
-        INSTALL_CMD="corepack enable pnpm && pnpm install --frozen-lockfile"
-    elif [ -f "yarn.lock" ]; then
-        PKG_MANAGER="yarn"
-        INSTALL_CMD="corepack enable yarn && yarn install --frozen-lockfile"
-    elif [ -f "bun.lockb" ]; then
-        PKG_MANAGER="bun"
-        INSTALL_CMD="npm install -g bun && bun install"
-    fi
-
-    cat << DOCKERFILE > Dockerfile
-FROM node:22-alpine AS deps
-WORKDIR /app
-COPY package*.json pnpm-lock.yaml* yarn.lock* bun.lockb* ./
-RUN $INSTALL_CMD
-
-FROM node:22-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN $PKG_MANAGER run build 2>/dev/null || npx next build
-
-FROM node:22-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=%s
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-EXPOSE %s
-CMD ["node", "server.js"]
-DOCKERFILE
-    echo "✅ Dockerfile generado para Next.js standalone."
-fi
-`, port, port)
-
-	// Argumentos para Kaniko (Build con Caché)
 	kanikoArgs := []string{
 		"--destination=" + imageURL,
 		"--cache=true",
 		"--cache-ttl=168h",
 	}
 
-	// Argumentos para Cloud Run (Deploy)
 	cloudRunArgs := []string{
 		"run", "deploy", serviceName,
 		"--image", imageURL,
@@ -133,13 +78,19 @@ fi
 			Args:       []string{"-c", "git clone --branch $_BRANCH https://x-access-token:$_GH_TOKEN@github.com/$_REPO_NAME.git ."},
 		},
 		{
-			Name:       "node:22",
+			Name:       "ubuntu",
 			Entrypoint: "bash",
-			Args:       []string{"-c", nextjsSetupScript},
+			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then echo "✅ Dockerfile detectado. Usando Kaniko."; else echo "⚠️ Dockerfile no encontrado. Usando Buildpacks."; fi`},
 		},
 		{
-			Name: "gcr.io/kaniko-project/executor:latest",
-			Args: kanikoArgs,
+			Name:       "gcr.io/kaniko-project/executor:latest",
+			Entrypoint: "bash",
+			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then /kaniko/executor ` + strings.Join(kanikoArgs, " ") + `; else echo "Skipping Kaniko"; fi`},
+		},
+		{
+			Name:       "gcr.io/google.com/cloudsdktool/cloud-sdk:latest",
+			Entrypoint: "bash",
+			Args:       []string{"-c", `if [ ! -f "Dockerfile" ]; then gcloud alpha builds submit --pack image=` + imageURL + ` --location=us-central1 --quiet; else echo "Skipping Buildpacks"; fi`},
 		},
 		{
 			Name: "gcr.io/cloud-builders/gcloud",

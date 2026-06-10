@@ -158,6 +158,29 @@ func GetCloudflareCredentials() (accountID, apiToken, kvNamespaceID string, err 
 // (bun, pnpm, yarn, npm) e instala + compila. Es reutilizable por todos los builders de Node.js.
 func PackageManagerDetectionScript() string {
 	return `
+echo "=== Detectando y Ajustando Versión de Node.js ==="
+MAJOR_VER=""
+if [ -f ".nvmrc" ]; then
+    MAJOR_VER=$(cat .nvmrc | tr -d '[:space:]' | tr -d 'v' | cut -d. -f1 | tr -cd '0-9')
+elif [ -f ".node-version" ]; then
+    MAJOR_VER=$(cat .node-version | tr -d '[:space:]' | tr -d 'v' | cut -d. -f1 | tr -cd '0-9')
+elif [ -f "package.json" ]; then
+    MAJOR_VER=$(node -e "try { const v = require('./package.json').engines.node; const m = v.match(/\d+/); if(m) console.log(m[0]) } catch(e) {}" | tr -d '[:space:]')
+fi
+
+if [ -n "$MAJOR_VER" ]; then
+    CURRENT_VER=$(node -v | tr -d 'v' | cut -d. -f1 | tr -d '[:space:]')
+    if [ "$MAJOR_VER" != "$CURRENT_VER" ]; then
+        echo "Proyecto requiere Node.js v$MAJOR_VER (actual: v$CURRENT_VER). Instalando..."
+        npm install -g n
+        n "$MAJOR_VER"
+        hash -r
+        echo "Nueva versión de Node.js activada: $(node -v)"
+    else
+        echo "Versión de Node.js actual (v$CURRENT_VER) coincide con la requerida (v$MAJOR_VER)."
+    fi
+fi
+
 echo "=== Detectando Gestor de Paquetes ==="
 
 if [ -f "bun.lockb" ]; then
@@ -271,5 +294,3 @@ func ExtractPagesProjectName(kvValue string) string {
 	}
 	return cleaned
 }
-
-

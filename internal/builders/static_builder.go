@@ -102,7 +102,7 @@ EOF
 				},
 			},
 			{
-				Name:       "node:20-slim",
+				Name:       "node:lts-slim",
 				Entrypoint: "bash",
 				Args:       []string{"-c", "npx --yes wrangler pages deploy $_ENTRY_PT --project-name $_SUB_DOMAIN --branch $_BRANCH"},
 				Env: []string{
