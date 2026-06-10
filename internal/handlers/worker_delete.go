@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
+	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -62,8 +63,14 @@ func (app *App) JobWorkerDeleteProject(c *gin.Context) {
 			return
 		}
 
+		// Obtener detalles del proyecto antes de borrarlo de Firestore
+		projectDetails, errProj := app.ProjectService.GetProjectDetails(c.Request.Context(), job.UserID, job.AppID)
+		if errProj != nil {
+			log.Printf("[Worker] Warning: No se pudieron obtener los detalles del proyecto %s antes del borrado: %v", job.AppID, errProj)
+		}
+
 		// Update project status via Service
-		if err := app.ProjectService.UpdateProjectStatus(c.Request.Context(), job.UserID, job.AppID, "deleting"); err != nil {
+		if err := app.ProjectService.UpdateProjectStatus(c.Request.Context(), job.UserID, job.AppID, "DELETING"); err != nil {
 			log.Printf("[Worker] Failed to update status para %s: %v", job.UserID, err)
 			c.Status(http.StatusOK)
 			return
@@ -81,19 +88,51 @@ func (app *App) JobWorkerDeleteProject(c *gin.Context) {
 			log.Printf("[Worker] Advertencia: GitHub Access Token vacío. Omitiendo borrado de webhook.")
 		}
 
-		// 2. Borrar Servicio de Cloud Run
-		errRun := deleteCloudRunService(c.Request.Context(), gcpProjectID, location, job.AppID)
-		if errRun != nil {
-			log.Printf("[Worker] Advertencia borrando Cloud Run: %v", errRun)
+		// Determinar si debemos borrar recursos de Cloudflare Pages o Cloud Run
+		isCFPages := false
+		isCloudRun := true // por defecto intentamos borrar por si no encontramos detalles
+
+		if projectDetails != nil {
+			if projectDetails.BuildConfig.Target == "CLOUDFLARE_PAGES" {
+				isCFPages = true
+				isCloudRun = false
+			} else if projectDetails.BuildConfig.Target == "CLOUD_RUN" {
+				isCFPages = false
+				isCloudRun = true
+			}
 		}
 
-		// 3. Borrar imágenes de Artifact Registry
-		errAtr := cleanArtifactRegistry(c.Request.Context(), gcpProjectID, location, artifactRegistryRepoName, job.AppID)
-		if errAtr != nil {
-			log.Printf("[Worker] Advertencia limpiando Artifacts: %v", errAtr)
+		// 2. Si es Cloudflare Pages, borrar proyecto en Cloudflare
+		if isCFPages {
+			cfAccountID, cfToken, _, cfErr := builders.GetCloudflareCredentials()
+			if cfErr == nil && cfAccountID != "" && cfToken != "" {
+				cfProjectName := builders.GenerateCFProjectName(job.AppID, job.UserID)
+				log.Printf("[Worker] Solicitando destrucción de Cloudflare Pages: %s", cfProjectName)
+				if errCF := builders.DeleteCloudflareProject(c.Request.Context(), cfAccountID, cfToken, cfProjectName); errCF != nil {
+					log.Printf("[Worker] Advertencia borrando Cloudflare Pages %s: %v", cfProjectName, errCF)
+				} else {
+					log.Printf("[Worker] Cloudflare Pages %s eliminado exitosamente.", cfProjectName)
+				}
+			} else {
+				log.Printf("[Worker] Advertencia: Omitiendo borrado de Cloudflare Pages por falta de credenciales: %v", cfErr)
+			}
 		}
 
-		// 4. Borrar de Firebase (Firestore)
+		// 3. Si es Cloud Run, borrar Servicio de Cloud Run
+		if isCloudRun {
+			errRun := deleteCloudRunService(c.Request.Context(), gcpProjectID, location, job.AppID)
+			if errRun != nil {
+				log.Printf("[Worker] Advertencia borrando Cloud Run: %v", errRun)
+			}
+
+			// 4. Borrar imágenes de Artifact Registry
+			errAtr := cleanArtifactRegistry(c.Request.Context(), gcpProjectID, location, artifactRegistryRepoName, job.AppID)
+			if errAtr != nil {
+				log.Printf("[Worker] Advertencia limpiando Artifacts: %v", errAtr)
+			}
+		}
+
+		// 5. Borrar de Firebase (Firestore) - Esto limpia el proyecto y su subcolección de builds
 		errDb := app.ProjectService.DeleteProject(c.Request.Context(), job.UserID, job.AppID)
 		if errDb != nil {
 			log.Printf("[Worker] Advertencia borrando registro en DB: %v", errDb)
@@ -105,6 +144,7 @@ func (app *App) JobWorkerDeleteProject(c *gin.Context) {
 
 	c.Status(http.StatusOK)
 }
+
 
 // Función auxiliar para purgar Artifact Registry con manejo inteligente de 404
 func cleanArtifactRegistry(ctx context.Context, projectID, location, artifactRegistryRepoName, packageName string) error {

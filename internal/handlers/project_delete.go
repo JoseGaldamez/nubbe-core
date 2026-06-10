@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/JoseGaldamez/nubbe-core/internal/pkg/pubsub"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc/codes"
@@ -44,6 +45,25 @@ func (app *App) DeleteProjectAsync(c *gin.Context) {
 		return
 	}
 
+	// 1.1. Actualizar estado a DELETING en Firestore inmediatamente
+	log.Printf("[Delete] Actualizando estado a DELETING para el proyecto %s en Firestore", appID)
+	if errStatus := app.ProjectService.UpdateProjectStatus(c.Request.Context(), userID, appID, "DELETING"); errStatus != nil {
+		log.Printf("[Delete] Warning: No se pudo cambiar el estado a DELETING para el proyecto %s: %v", appID, errStatus)
+	}
+
+	// 1.2. Corte de tráfico instantáneo: Borrar ruta de Cloudflare KV de forma síncrona
+	cfAccountID, cfToken, cfKVNamespace, cfErr := builders.GetCloudflareCredentials()
+	if cfErr == nil && cfAccountID != "" && cfToken != "" && cfKVNamespace != "" {
+		log.Printf("[Delete] Borrando ruta de Cloudflare KV para subdominio: %s", appID)
+		if errKV := builders.DeleteRouteInKV(c.Request.Context(), cfAccountID, cfToken, cfKVNamespace, appID); errKV != nil {
+			log.Printf("[Delete] Warning: No se pudo borrar la ruta en Cloudflare KV para %s: %v", appID, errKV)
+		} else {
+			log.Printf("[Delete] Ruta KV para %s.nubbe.run eliminada con éxito", appID)
+		}
+	} else {
+		log.Printf("[Delete] Warning: Omitiendo borrado de KV, credenciales de Cloudflare incompletas o erróneas: %v", cfErr)
+	}
+
 	// 2. Publish deletion job to PubSub via pre-initialized client
 	job := JobPayload{
 		Action:   "delete_project",
@@ -67,3 +87,4 @@ func (app *App) DeleteProjectAsync(c *gin.Context) {
 		"msg_id":  msgID,
 	})
 }
+

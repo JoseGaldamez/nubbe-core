@@ -59,7 +59,7 @@ func main() {
 	projectService := service.NewProjectService(userRepo, projectRepo, cfg.AESEncryptionKey)
 
 	// 4. Setup Application and Router
-	appDeps := handlers.NewApp(fsClient, storageClient, authClient, projectService, psClient)
+	appDeps := handlers.NewApp(fsClient, storageClient, authClient, projectService, psClient, cfg.PaddleWebhookSecret, cfg.PaddleHobbyPriceID, cfg.PaddleProPriceID, cfg.PaddleEnvironment)
 	router := appDeps.InitRouter(cfg.WebhookAudience, cfg.PubSubServiceAccountEmail, cfg.JobsAudience)
 
 	// 5. Start Server with Graceful Shutdown support

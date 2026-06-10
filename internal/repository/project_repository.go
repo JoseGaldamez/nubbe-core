@@ -17,6 +17,7 @@ type ProjectRepository interface {
 	SaveProjectVars(ctx context.Context, userID, projectID string, encryptedVars interface{}) error
 	GetProjectVars(ctx context.Context, userID, projectID string) (string, error)
 	DeleteProject(ctx context.Context, userID, projectID string) error
+	CheckSubdomainExistsGlobal(ctx context.Context, subdomain string) (bool, error)
 }
 
 func (r *firestoreProjectRepo) CreateProject(ctx context.Context, userID string, details *ProjectDetails) error {
@@ -198,3 +199,14 @@ func (r *firestoreProjectRepo) DeleteProject(ctx context.Context, userID, projec
 
 	return nil
 }
+
+func (r *firestoreProjectRepo) CheckSubdomainExistsGlobal(ctx context.Context, subdomain string) (bool, error) {
+	// Realiza una consulta global en todas las subcolecciones "projects" para ver si el subdominio está tomado
+	query := r.client.CollectionGroup("projects").Where("subdomain", "==", subdomain).Limit(1)
+	docs, err := query.Documents(ctx).GetAll()
+	if err != nil {
+		return false, fmt.Errorf("failed to query global projects collection group: %w", err)
+	}
+	return len(docs) > 0, nil
+}
+

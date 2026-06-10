@@ -4,9 +4,11 @@ import (
 	"context"
 	"log"
 	"net/http"
-
+	"regexp"
+	"strings"
 	"time"
 
+	"github.com/JoseGaldamez/nubbe-core/internal/builders"
 	"github.com/JoseGaldamez/nubbe-core/internal/repository"
 	"github.com/gin-gonic/gin"
 )
@@ -35,6 +37,62 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 		})
 		return
 	}
+
+	// Sanitizar subdominio
+	req.SubDomain = SanitizeSubdomain(req.SubDomain)
+
+	// Validar formato de subdominio
+	if !IsValidSubdomain(req.SubDomain) {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Subdominio inválido",
+			"details": "El subdominio debe tener entre 3 y 63 caracteres y solo contener letras minúsculas, números y guiones.",
+		})
+		return
+	}
+
+	// Validar subdominios reservados del sistema
+	if IsReservedSubdomain(req.SubDomain) {
+		ctx.JSON(http.StatusForbidden, gin.H{
+			"error":   "Subdominio reservado",
+			"details": "El subdominio solicitado es un nombre reservado del sistema y no puede registrarse.",
+		})
+		return
+	}
+
+	// Validar disponibilidad global de subdominio en Firestore
+	isGlobalTaken, err := app.ProjectService.CheckSubdomainExistsGlobal(ctx.Request.Context(), req.SubDomain)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Error al verificar disponibilidad de subdominio",
+			"details": err.Error(),
+		})
+		return
+	}
+	if isGlobalTaken {
+		ctx.JSON(http.StatusConflict, gin.H{
+			"error":   "Subdominio no disponible",
+			"details": "El subdominio ya está registrado por otro usuario en Nubbe.run.",
+		})
+		return
+	}
+
+	// Validar disponibilidad en Cloudflare KV en tiempo real
+	cfAccountID, cfToken, cfKVNamespaceID, err := builders.GetCloudflareCredentials()
+	if err == nil && cfAccountID != "" && cfToken != "" && cfKVNamespaceID != "" {
+		isKVTaken, err := builders.CheckRouteInKV(ctx.Request.Context(), cfAccountID, cfToken, cfKVNamespaceID, req.SubDomain)
+		if err != nil {
+			log.Printf("Warning: Failed to check KV route availability for %s: %v", req.SubDomain, err)
+		} else if isKVTaken {
+			ctx.JSON(http.StatusConflict, gin.H{
+				"error":   "Subdominio no disponible en la red",
+				"details": "El subdominio ya se encuentra en uso activo en la red de Nubbe.run.",
+			})
+			return
+		}
+	} else {
+		log.Printf("Warning: Cloudflare credentials not fully set, skipping KV availability check")
+	}
+
 
 	// Obtener el ID del usuario desde el contexto
 	userID := ctx.GetString("user_id")
@@ -140,3 +198,47 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 		"pubsub_msg_id": msgID,
 	})
 }
+
+// SanitizeSubdomain cleans the subdomain input: converts to lowercase, removes non-alphanumeric/hyphen characters, and trims.
+func SanitizeSubdomain(subdomain string) string {
+	subdomain = strings.TrimSpace(strings.ToLower(subdomain))
+	// Remplazar cualquier carácter que no sea a-z, 0-9 o guion con vacío
+	reg := regexp.MustCompile("[^a-z0-9-]")
+	subdomain = reg.ReplaceAllString(subdomain, "")
+	// Remplazar múltiples guiones seguidos por un solo guion
+	regMultiDash := regexp.MustCompile("-+")
+	subdomain = regMultiDash.ReplaceAllString(subdomain, "-")
+	// Eliminar guiones al inicio o al final
+	subdomain = strings.Trim(subdomain, "-")
+	return subdomain
+}
+
+// IsValidSubdomain verifica que el subdominio cumpla con los límites de longitud básicos de DNS (entre 3 y 63 caracteres).
+func IsValidSubdomain(subdomain string) bool {
+	return len(subdomain) >= 3 && len(subdomain) <= 63
+}
+
+// Map de subdominios reservados del sistema (bloqueados para registro)
+var ReservedSubdomains = map[string]bool{
+	"admin":     true,
+	"api":       true,
+	"login":     true,
+	"dashboard": true,
+	"app":       true,
+	"www":       true,
+	"billing":   true,
+	"support":   true,
+	"status":    true,
+	"core":      true,
+	"nubbe":     true,
+	"main":      true,
+	"dev":       true,
+	"staging":   true,
+	"prod":      true,
+}
+
+// IsReservedSubdomain verifica si un subdominio está en la lista de reservados.
+func IsReservedSubdomain(subdomain string) bool {
+	return ReservedSubdomains[subdomain]
+}
+

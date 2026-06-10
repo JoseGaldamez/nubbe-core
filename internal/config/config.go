@@ -16,6 +16,10 @@ type Config struct {
 	Port                      string
 	GinMode                   string
 	AESEncryptionKey          string
+	PaddleWebhookSecret       string
+	PaddleHobbyPriceID        string
+	PaddleProPriceID          string
+	PaddleEnvironment         string
 }
 
 func Load() (*Config, error) {
@@ -31,6 +35,10 @@ func Load() (*Config, error) {
 		Port:                      os.Getenv("PORT"),
 		GinMode:                   os.Getenv("GIN_MODE"),
 		AESEncryptionKey:          os.Getenv("AES_ENCRYPTION_KEY"),
+		PaddleWebhookSecret:       os.Getenv("PADDLE_WEBHOOK_SECRET"),
+		PaddleHobbyPriceID:        os.Getenv("PADDLE_HOBBY_PRICE_ID"),
+		PaddleProPriceID:          os.Getenv("PADDLE_PRO_PRICE_ID"),
+		PaddleEnvironment:         os.Getenv("PADDLE_ENVIRONMENT"),
 	}
 
 	if cfg.Port == "" {
@@ -44,6 +52,10 @@ func Load() (*Config, error) {
 	if cfg.AESEncryptionKey == "" {
 		// Llave de ejemplo de 32 bytes para AES-256 (En prod usar una real via ENV)
 		cfg.AESEncryptionKey = "12345678901234567890123456789012"
+	}
+
+	if cfg.PaddleEnvironment == "" {
+		cfg.PaddleEnvironment = "sandbox"
 	}
 
 	// Validate required variables

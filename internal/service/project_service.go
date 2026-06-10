@@ -258,3 +258,8 @@ func (service *ProjectService) DeleteGitHubWebhook(ctx context.Context, userID, 
 
 	return nil
 }
+
+func (service *ProjectService) CheckSubdomainExistsGlobal(ctx context.Context, subdomain string) (bool, error) {
+	return service.projectRepo.CheckSubdomainExistsGlobal(ctx, subdomain)
+}
+

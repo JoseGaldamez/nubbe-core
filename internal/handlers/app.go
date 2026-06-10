@@ -16,22 +16,30 @@ import (
 
 // App holds the dependencies for the application handlers.
 type App struct {
-	Firestore      *firestore.Client
-	Storage        *storage.Client
-	Auth           *firebaseAuth.Client
-	ProjectService *service.ProjectService
-	PubSub         *pubsub.Client
-	WG             sync.WaitGroup
+	Firestore            *firestore.Client
+	Storage              *storage.Client
+	Auth                 *firebaseAuth.Client
+	ProjectService       *service.ProjectService
+	PubSub               *pubsub.Client
+	WG                   sync.WaitGroup
+	PaddleWebhookSecret  string
+	PaddleHobbyPriceID   string
+	PaddleProPriceID     string
+	PaddleEnvironment    string
 }
 
 // NewApp creates a new App instance with the provided dependencies.
-func NewApp(fs *firestore.Client, storage *storage.Client, auth *firebaseAuth.Client, projectService *service.ProjectService, pubsub *pubsub.Client) *App {
+func NewApp(fs *firestore.Client, storage *storage.Client, auth *firebaseAuth.Client, projectService *service.ProjectService, pubsub *pubsub.Client, paddleWebhookSecret, paddleHobbyPriceID, paddleProPriceID, paddleEnvironment string) *App {
 	return &App{
-		Firestore:      fs,
-		Storage:        storage,
-		Auth:           auth,
-		ProjectService: projectService,
-		PubSub:         pubsub,
+		Firestore:            fs,
+		Storage:              storage,
+		Auth:                 auth,
+		ProjectService:       projectService,
+		PubSub:               pubsub,
+		PaddleWebhookSecret:  paddleWebhookSecret,
+		PaddleHobbyPriceID:   paddleHobbyPriceID,
+		PaddleProPriceID:     paddleProPriceID,
+		PaddleEnvironment:    paddleEnvironment,
 	}
 }
 
@@ -59,7 +67,7 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 	api.Use(middleware.FirebaseAuthMiddleware(app.Auth))
 	{
 		// create proyect
-		api.POST("/projects/initialize", app.HandleCreateProject)
+		api.POST("/projects/initialize", middleware.SubscriptionLimitMiddleware(app.Firestore), app.HandleCreateProject)
 
 		// delete proyect
 		api.DELETE("/projects/:id", app.DeleteProjectAsync)
@@ -78,6 +86,7 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 	{
 		webhooks.POST("/github", app.HandleGitHubWebhook)
 		webhooks.POST("/cloudbuild", middleware.GoogleOIDCMiddleware(webhookAudience, saEmail), app.HandleCloudBuildWebhook)
+		webhooks.POST("/paddle", app.HandlePaddleWebhook)
 	}
 
 	// Grupo de rutas para Workers internos (Jobs)
