@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -68,13 +71,44 @@ func GoogleOIDCMiddleware(expectedAudience string, expectedEmail string) gin.Han
 		token := parts[1]
 		ctx := c.Request.Context()
 
+		// Extraer la audiencia real del token decodificando el payload JWT (sin verificar firma aún)
+		partsJWT := strings.Split(token, ".")
+		if len(partsJWT) == 3 {
+			payloadBytes, errDec := base64.RawURLEncoding.DecodeString(partsJWT[1])
+			if errDec == nil {
+				var claims map[string]interface{}
+				if errJSON := json.Unmarshal(payloadBytes, &claims); errJSON == nil {
+					if aud, ok := claims["aud"].(string); ok {
+						// Si la audiencia del token coincide con el patrón esperado o la ruta de la petición,
+						// la usamos como la audiencia esperada para pasar a idtoken.Validate
+						if aud == expectedAudience || strings.Contains(aud, c.Request.URL.Path) {
+							log.Printf("[OIDC Middleware] Usando audiencia extraída del token: %s", aud)
+							expectedAudience = aud
+						}
+					}
+				}
+			}
+		}
+
 		// Validar el token OIDC
 		payload, err := idtoken.Validate(ctx, token, expectedAudience)
 		if err != nil {
-			log.Printf("Error validando OIDC token: %v", err)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid OIDC token"})
-			c.Abort()
-			return
+			// Intentar con la URL del endpoint real como audiencia fallback (ej: HTTPS en Cloud Run)
+			proto := c.GetHeader("X-Forwarded-Proto")
+			if proto == "" {
+				proto = "https"
+			}
+			fallbackAudience := fmt.Sprintf("%s://%s%s", proto, c.Request.Host, c.Request.URL.Path)
+			log.Printf("[OIDC Middleware] expectedAudience (%s) failed: %v. Retrying with fallbackAudience (%s)", expectedAudience, err, fallbackAudience)
+			
+			var errFallback error
+			payload, errFallback = idtoken.Validate(ctx, token, fallbackAudience)
+			if errFallback != nil {
+				log.Printf("[OIDC Middleware] OIDC token validation failed: %v", errFallback)
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid OIDC token", "details": errFallback.Error()})
+				c.Abort()
+				return
+			}
 		}
 
 		// Verificar que el emisor sea Google

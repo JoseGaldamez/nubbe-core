@@ -108,6 +108,7 @@ type ProjectStatus struct {
 type ProjectDetails struct {
 	ProjectID   string           `firestore:"project_id" json:"project_id"`
 	Subdomain   string           `firestore:"subdomain" json:"subdomain"`
+	Title       string           `firestore:"title" json:"title"`
 	OwnerID     string           `firestore:"owner_id" json:"owner_id"`
 	Repository  RepositoryConfig `firestore:"repository" json:"repository"`
 	BuildConfig BuildConfig      `firestore:"build_config" json:"build_config"`

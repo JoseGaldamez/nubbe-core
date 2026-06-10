@@ -120,6 +120,7 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 	projectDetails := &repository.ProjectDetails{
 		ProjectID: req.SubDomain, // Usando subdomain como ID por ahora
 		Subdomain: req.SubDomain,
+		Title:     req.Title,
 		OwnerID:   userID,
 		Repository: repository.RepositoryConfig{
 			URL:    "https://github.com/" + req.RepoName,

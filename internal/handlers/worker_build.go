@@ -71,7 +71,7 @@ func (app *App) JobWorkerBuildProject(c *gin.Context) {
 		if updateErr := app.ProjectService.UpdateProjectStatus(c.Request.Context(), payload.UserID, payload.ProjectID, "FAILED"); updateErr != nil {
 			log.Printf("[BuildWorker] No se pudo actualizar estado a FAILED para %s: %v", payload.ProjectID, updateErr)
 		}
-		
+
 		// Enviar un log amigable al Hub para feedback en tiempo real si el usuario está escuchando
 		Hub.mu.RLock()
 		channels, ok := Hub.clients[payload.ProjectID]
@@ -95,5 +95,16 @@ func (app *App) JobWorkerBuildProject(c *gin.Context) {
 	}
 
 	log.Printf("[BuildWorker] Build triggered successfully for %s. BuildID: %s", payload.ProjectID, info.BuildID)
+
+	// Inicializar el documento del build en Firestore para que la UI pueda suscribirse inmediatamente
+	if info.BuildID != "" {
+		initialMsg := "Compilación en cola"
+		if err := app.ProjectService.UpdateStatus(c.Request.Context(), payload.UserID, payload.ProjectID, info.BuildID, "QUEUED", "", initialMsg); err != nil {
+			log.Printf("[BuildWorker] Advertencia: No se pudo crear el registro inicial de build en Firestore para %s: %v", payload.ProjectID, err)
+		}
+	} else {
+		log.Printf("[BuildWorker] Advertencia: BuildID vacío tras iniciar compilación para %s", payload.ProjectID)
+	}
+
 	c.Status(http.StatusOK)
 }
