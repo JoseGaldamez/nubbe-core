@@ -64,6 +64,15 @@ func (app *App) DeleteProjectAsync(c *gin.Context) {
 		log.Printf("[Delete] Warning: Omitiendo borrado de KV, credenciales de Cloudflare incompletas o erróneas: %v", cfErr)
 	}
 
+	// 1.3. Liberar subdominio instantáneamente en Firestore (colección global subdomains)
+	log.Printf("[Delete] Liberando subdominio %s en Firestore (colección subdomains)", appID)
+	if _, errSub := app.Firestore.Collection("subdomains").Doc(appID).Delete(c.Request.Context()); errSub != nil {
+		log.Printf("[Delete] Warning: No se pudo eliminar la reserva del subdominio %s en Firestore: %v", appID, errSub)
+	} else {
+		log.Printf("[Delete] Reserva del subdominio %s eliminada de Firestore", appID)
+	}
+
+
 	// 2. Publish deletion job to PubSub via pre-initialized client
 	job := JobPayload{
 		Action:   "delete_project",

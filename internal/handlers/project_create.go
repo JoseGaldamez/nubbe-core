@@ -151,6 +151,13 @@ func (app *App) HandleCreateProject(ctx *gin.Context) {
 	}
 
 	if err := app.ProjectService.CreateProject(ctx.Request.Context(), userID, projectDetails); err != nil {
+		if strings.Contains(err.Error(), "subdomain_taken") {
+			ctx.JSON(http.StatusConflict, gin.H{
+				"error":   "Subdominio no disponible",
+				"details": "El subdominio solicitado ya se encuentra registrado por otro usuario.",
+			})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create project record", "details": err.Error()})
 		return
 	}

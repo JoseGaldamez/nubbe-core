@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
@@ -21,9 +22,31 @@ type ProjectRepository interface {
 }
 
 func (r *firestoreProjectRepo) CreateProject(ctx context.Context, userID string, details *ProjectDetails) error {
-	_, err := r.client.Collection("users").Doc(userID).Collection("projects").Doc(details.Subdomain).Set(ctx, details)
+	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		// 1. Verificar si el subdominio ya está tomado en la colección global "subdomains"
+		subdomainRef := r.client.Collection("subdomains").Doc(details.Subdomain)
+		subdomainDoc, err := tx.Get(subdomainRef)
+		if err == nil && subdomainDoc.Exists() {
+			return fmt.Errorf("subdomain_taken")
+		}
+
+		// 2. Crear el documento en "subdomains"
+		err = tx.Set(subdomainRef, map[string]interface{}{
+			"projectId": details.Subdomain,
+			"ownerId":   userID,
+			"createdAt": firestore.ServerTimestamp,
+		})
+		if err != nil {
+			return err
+		}
+
+		// 3. Crear el proyecto en "users/{userID}/projects/{subdomain}"
+		projectRef := r.client.Collection("users").Doc(userID).Collection("projects").Doc(details.Subdomain)
+		return tx.Set(projectRef, details)
+	})
+
 	if err != nil {
-		return fmt.Errorf("failed to create project in firestore: %w", err)
+		return fmt.Errorf("failed to create project transaction: %w", err)
 	}
 	return nil
 }
@@ -196,6 +219,11 @@ func (r *firestoreProjectRepo) DeleteProject(ctx context.Context, userID, projec
 	// 2. Borrar documento del proyecto
 	if _, err := projectRef.Delete(ctx); err != nil {
 		return fmt.Errorf("failed to delete project doc: %w", err)
+	}
+
+	// 3. Borrar el subdominio de la colección global "subdomains" si existe
+	if _, err := r.client.Collection("subdomains").Doc(projectID).Delete(ctx); err != nil {
+		log.Printf("Warning: failed to delete subdomain reservation for %s: %v", projectID, err)
 	}
 
 	return nil
