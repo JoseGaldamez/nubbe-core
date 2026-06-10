@@ -79,9 +79,9 @@ else
     elif [ -f "Pipfile" ]; then
         echo "Pipfile detectado."
         INSTALL_CMD="pip install pipenv && pipenv install --system --deploy"
-    elif [ -f "$DEPS_FILE" ]; then
-        echo "$DEPS_FILE detectado."
-        INSTALL_CMD="pip install --no-cache-dir -r $DEPS_FILE"
+    elif [ -f "$$DEPS_FILE" ]; then
+        echo "$$DEPS_FILE detectado."
+        INSTALL_CMD="pip install --no-cache-dir -r $$DEPS_FILE"
     else
         echo "⚠️ No se encontró archivo de dependencias. Se intentará instalar sin dependencias."
         INSTALL_CMD="echo 'Sin dependencias detectadas'"
@@ -94,7 +94,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN $INSTALL_CMD
+RUN $$INSTALL_CMD
 
 ENV PORT=%s
 

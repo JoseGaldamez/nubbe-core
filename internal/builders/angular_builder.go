@@ -54,21 +54,21 @@ func (b *AngularBuilder) Deploy(ctx context.Context, config BuildConfig) (*Build
 	angularBuildScript := PackageManagerDetectionScript() + fmt.Sprintf(`
 echo "=== Detectando directorio de salida de Angular ==="
 BUILD_DIR="%s"
-if [ -z "$BUILD_DIR" ]; then
+if [ -z "$$BUILD_DIR" ]; then
     # Angular 17+ genera en dist/[nombre]/browser
-    BROWSER_DIR=$(find dist -type d -name "browser" 2>/dev/null | head -1)
-    if [ -n "$BROWSER_DIR" ]; then
-        BUILD_DIR="$BROWSER_DIR"
-        echo "Angular 17+ detectado. Directorio de salida: $BUILD_DIR"
+    BROWSER_DIR=$$(find dist -type d -name "browser" 2>/dev/null | head -1)
+    if [ -n "$$BROWSER_DIR" ]; then
+        BUILD_DIR="$$BROWSER_DIR"
+        echo "Angular 17+ detectado. Directorio de salida: $$BUILD_DIR"
     elif [ -d "dist" ]; then
         # Angular legacy: buscar el primer subdirectorio dentro de dist
-        FIRST_SUBDIR=$(ls -d dist/*/ 2>/dev/null | head -1)
-        if [ -n "$FIRST_SUBDIR" ]; then
-            BUILD_DIR="$FIRST_SUBDIR"
+        FIRST_SUBDIR=$$(ls -d dist/*/ 2>/dev/null | head -1)
+        if [ -n "$$FIRST_SUBDIR" ]; then
+            BUILD_DIR="$$FIRST_SUBDIR"
         else
             BUILD_DIR="dist"
         fi
-        echo "Angular legacy detectado. Directorio de salida: $BUILD_DIR"
+        echo "Angular legacy detectado. Directorio de salida: $$BUILD_DIR"
     else
         BUILD_DIR="dist"
         echo "No se encontró directorio de salida. Usando dist por defecto."
@@ -76,10 +76,10 @@ if [ -z "$BUILD_DIR" ]; then
 fi
 
 echo "=== Configurando Enrutamiento SPA para Angular Router ==="
-echo "/* /index.html 200" > $BUILD_DIR/_redirects
+echo "/* /index.html 200" > $$BUILD_DIR/_redirects
 
 echo "=== Desplegando Angular a la red Edge ==="
-npx --yes wrangler pages deploy $BUILD_DIR --project-name $_SUB_DOMAIN --branch $_BRANCH
+npx --yes wrangler pages deploy $$BUILD_DIR --project-name $_SUB_DOMAIN --branch $_BRANCH
 `, buildDir)
 
 	cbService, err := cloudbuild.NewService(ctx)
