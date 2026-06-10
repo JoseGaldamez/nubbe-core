@@ -18,8 +18,14 @@ func (app *App) DebugPubSub(c *gin.Context) {
 		projectID = "nubbe-run"
 	}
 
-	// Initialize the Google API client for Pub/Sub using credentials
-	service, err := pubsub.NewService(ctx, option.WithCredentialsFile("./firebase-credentials.json"))
+	// Initialize the Google API client for Pub/Sub (ADC handles this implicitly in Cloud Run, local fallback if credentials exist)
+	var service *pubsub.Service
+	var err error
+	if _, statErr := os.Stat("./firebase-credentials.json"); statErr == nil {
+		service, err = pubsub.NewService(ctx, option.WithCredentialsFile("./firebase-credentials.json"))
+	} else {
+		service, err = pubsub.NewService(ctx)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create pubsub service client", "details": err.Error()})
 		return
