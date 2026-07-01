@@ -48,9 +48,38 @@ func (b *PythonBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 	if startCmd == "" {
 		startCmd = config.EntryPoint
 	}
-	if startCmd == "" {
-		// Default: intentar uvicorn para FastAPI, o gunicorn, o python app.py
-		startCmd = fmt.Sprintf("python -m uvicorn app:app --host 0.0.0.0 --port %s", port)
+
+	if config.ProjectType == "streamlit" {
+		// Si es Streamlit, nos aseguramos de que corra con streamlit run y los flags adecuados para Cloud Run
+		if startCmd == "" {
+			startCmd = "app.py" // fallback default
+		}
+		// Si el usuario especificó solo el archivo (ej: "market.py" o "app.py"), le agregamos el comando streamlit run y los flags necesarios
+		if !strings.HasPrefix(startCmd, "streamlit run") {
+			startCmd = fmt.Sprintf("streamlit run %s --server.port %s --server.address 0.0.0.0 --server.enableCORS=false --server.enableWebsocketCompression=false --server.enableXsrfProtection=false", startCmd, port)
+		} else {
+			// Si ya tiene "streamlit run", nos aseguramos de agregar los flags necesarios si no están presentes
+			if !strings.Contains(startCmd, "--server.port") {
+				startCmd = fmt.Sprintf("%s --server.port %s", startCmd, port)
+			}
+			if !strings.Contains(startCmd, "--server.address") {
+				startCmd = fmt.Sprintf("%s --server.address 0.0.0.0", startCmd)
+			}
+			if !strings.Contains(startCmd, "--server.enableCORS") {
+				startCmd = fmt.Sprintf("%s --server.enableCORS=false", startCmd)
+			}
+			if !strings.Contains(startCmd, "--server.enableWebsocketCompression") {
+				startCmd = fmt.Sprintf("%s --server.enableWebsocketCompression=false", startCmd)
+			}
+			if !strings.Contains(startCmd, "--server.enableXsrfProtection") {
+				startCmd = fmt.Sprintf("%s --server.enableXsrfProtection=false", startCmd)
+			}
+		}
+	} else {
+		// Comportamiento por defecto para otros proyectos Python
+		if startCmd == "" {
+			startCmd = fmt.Sprintf("python -m uvicorn app:app --host 0.0.0.0 --port %s", port)
+		}
 	}
 
 	serviceName := strings.ToLower(config.SubDomain)

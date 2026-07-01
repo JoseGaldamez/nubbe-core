@@ -14,6 +14,7 @@ type BuildConfig struct {
 	EntryPoint     string            // Ruta de entrada o comando de inicio
 	EnvVars        map[string]string // Variables de entorno
 	AdvancedConfig map[string]string // Configuraciones específicas adicionales
+	ProjectType    string            // Tipo de proyecto (ej: static, react, python, streamlit, etc.)
 }
 
 // BuildResult contiene la información de respuesta tras iniciar un despliegue.

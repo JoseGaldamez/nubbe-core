@@ -44,6 +44,7 @@ func (service *ProjectService) TriggerBuild(ctx context.Context, userID, subDoma
 		EntryPoint:     entryPoint,
 		EnvVars:        envVars,
 		AdvancedConfig: advancedConfig,
+		ProjectType:    projectType,
 	}
 
 	// 3. Ejecutar la estrategia de despliegue delegada
