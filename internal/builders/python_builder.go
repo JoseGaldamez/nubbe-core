@@ -148,8 +148,8 @@ fi
 			Args:       []string{"-c", pythonSetupScript},
 		},
 		{
-			Name:       "gcr.io/kaniko-project/executor:latest",
-			Entrypoint: "bash",
+			Name:       "gcr.io/kaniko-project/executor:debug",
+			Entrypoint: "/busybox/sh",
 			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then /kaniko/executor ` + strings.Join(kanikoArgs, " ") + `; else echo "Skipping Kaniko"; fi`},
 		},
 		{

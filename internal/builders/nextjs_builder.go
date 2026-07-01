@@ -83,8 +83,8 @@ func (b *NextjsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then echo "✅ Dockerfile detectado. Usando Kaniko."; else echo "⚠️ Dockerfile no encontrado. Usando Buildpacks."; fi`},
 		},
 		{
-			Name:       "gcr.io/kaniko-project/executor:latest",
-			Entrypoint: "bash",
+			Name:       "gcr.io/kaniko-project/executor:debug",
+			Entrypoint: "/busybox/sh",
 			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then /kaniko/executor ` + strings.Join(kanikoArgs, " ") + `; else echo "Skipping Kaniko"; fi`},
 		},
 		{

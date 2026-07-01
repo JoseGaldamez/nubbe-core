@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,8 +21,53 @@ type UserDocument struct {
 	Subscription Subscription `firestore:"subscription"`
 }
 
+// SubscriptionRetriever define las operaciones de obtención de suscripciones y recuento de proyectos para un usuario.
+type SubscriptionRetriever interface {
+	GetSubscription(ctx context.Context, userID string) (Subscription, error)
+	GetProjectCount(ctx context.Context, userID string) (int, error)
+}
+
+type firestoreRetriever struct {
+	client *firestore.Client
+}
+
+func (r *firestoreRetriever) GetSubscription(ctx context.Context, userID string) (Subscription, error) {
+	dsnap, err := r.client.Collection("users").Doc(userID).Get(ctx)
+	if err != nil {
+		return Subscription{}, err
+	}
+	var userDoc UserDocument
+	if err := dsnap.DataTo(&userDoc); err != nil {
+		return Subscription{}, err
+	}
+	return userDoc.Subscription, nil
+}
+
+func (r *firestoreRetriever) GetProjectCount(ctx context.Context, userID string) (int, error) {
+	iter := r.client.Collection("users").Doc(userID).Collection("projects").Documents(ctx)
+	defer iter.Stop()
+
+	projectCount := 0
+	for {
+		_, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+		projectCount++
+	}
+	return projectCount, nil
+}
+
 // SubscriptionLimitMiddleware intercepta la creación de proyectos y verifica los límites del plan del usuario en Firestore.
 func SubscriptionLimitMiddleware(client *firestore.Client) gin.HandlerFunc {
+	return SubscriptionLimitMiddlewareExt(&firestoreRetriever{client: client})
+}
+
+// SubscriptionLimitMiddlewareExt intercepta la creación de proyectos y verifica los límites del plan del usuario usando cualquier retriever.
+func SubscriptionLimitMiddlewareExt(retriever SubscriptionRetriever) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
 		if userID == "" {
@@ -33,16 +79,13 @@ func SubscriptionLimitMiddleware(client *firestore.Client) gin.HandlerFunc {
 		ctx := c.Request.Context()
 
 		// 1. Obtener la suscripción del usuario desde Firestore
-		dsnap, err := client.Collection("users").Doc(userID).Get(ctx)
+		subscription, err := retriever.GetSubscription(ctx, userID)
 		var planID string = "free" // Default
-		if err == nil && dsnap.Exists() {
-			var userDoc UserDocument
-			if err := dsnap.DataTo(&userDoc); err == nil {
-				if userDoc.Subscription.PlanIDCamel != "" {
-					planID = userDoc.Subscription.PlanIDCamel
-				} else if userDoc.Subscription.PlanID != "" {
-					planID = userDoc.Subscription.PlanID
-				}
+		if err == nil {
+			if subscription.PlanIDCamel != "" {
+				planID = subscription.PlanIDCamel
+			} else if subscription.PlanID != "" {
+				planID = subscription.PlanID
 			}
 		}
 
@@ -63,24 +106,14 @@ func SubscriptionLimitMiddleware(client *firestore.Client) gin.HandlerFunc {
 		}
 
 		// 3. Contar los proyectos actuales del usuario
-		iter := client.Collection("users").Doc(userID).Collection("projects").Documents(ctx)
-		defer iter.Stop()
-
-		projectCount := 0
-		for {
-			_, err := iter.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error":   "Failed to count existing projects",
-					"details": err.Error(),
-				})
-				c.Abort()
-				return
-			}
-			projectCount++
+		projectCount, err := retriever.GetProjectCount(ctx, userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to count existing projects",
+				"details": err.Error(),
+			})
+			c.Abort()
+			return
 		}
 
 		// 4. Verificar límite
