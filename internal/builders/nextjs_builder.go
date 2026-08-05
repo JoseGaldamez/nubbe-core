@@ -43,6 +43,64 @@ func (b *NextjsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 
 	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", b.projectID, serviceName)
 
+	var envBuilder strings.Builder
+	if len(config.EnvVars) > 0 {
+		for k, v := range config.EnvVars {
+			cleanVal := strings.ReplaceAll(v, "\"", "\\\"")
+			envBuilder.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, cleanVal))
+		}
+	}
+
+	nextjsSetupScript := fmt.Sprintf(`
+echo "=== Preparando proyecto Next.js ==="
+
+if [ -f "Dockerfile" ]; then
+    echo "✅ Dockerfile detectado. Se usará tal cual."
+else
+    echo "⚠️ Dockerfile no encontrado. Generando Dockerfile para Next.js..."
+
+    cat << 'DOCKERFILE' > Dockerfile
+FROM node:20-alpine
+WORKDIR /app
+
+%s
+
+COPY package*.json pnpm-lock.yaml* yarn.lock* bun.lock* bun.lockb* ./
+
+RUN if [ -f pnpm-lock.yaml ]; then \
+      npm install -g pnpm && pnpm config set approve-builds true && pnpm install --no-frozen-lockfile; \
+    elif [ -f yarn.lock ]; then \
+      yarn install; \
+    elif [ -f bun.lock ] || [ -f bun.lockb ]; then \
+      npm install -g bun && bun install; \
+    else \
+      npm install; \
+    fi
+
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+ENV PORT=%s
+
+RUN if [ -f pnpm-lock.yaml ]; then \
+      pnpm run build; \
+    elif [ -f yarn.lock ]; then \
+      yarn build; \
+    elif [ -f bun.lock ] || [ -f bun.lockb ]; then \
+      bun run build; \
+    else \
+      npm run build; \
+    fi
+
+EXPOSE %s
+
+CMD ["sh", "-c", "if [ -f pnpm-lock.yaml ]; then pnpm start; elif [ -f yarn.lock ]; then yarn start; elif [ -f bun.lock ] || [ -f bun.lockb ]; then bun start; else npm start; fi"]
+DOCKERFILE
+    echo "✅ Dockerfile generado para Next.js."
+fi
+`, envBuilder.String(), port, port)
+
 	kanikoArgs := []string{
 		"--destination=" + imageURL,
 		"--cache=true",
@@ -80,17 +138,12 @@ func (b *NextjsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 		{
 			Name:       "ubuntu",
 			Entrypoint: "bash",
-			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then echo "✅ Dockerfile detectado. Usando Kaniko."; else echo "⚠️ Dockerfile no encontrado. Usando Buildpacks."; fi`},
+			Args:       []string{"-c", nextjsSetupScript},
 		},
 		{
 			Name:       "gcr.io/kaniko-project/executor:debug",
 			Entrypoint: "/busybox/sh",
-			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then /kaniko/executor ` + strings.Join(kanikoArgs, " ") + `; else echo "Skipping Kaniko"; fi`},
-		},
-		{
-			Name:       "gcr.io/google.com/cloudsdktool/cloud-sdk:latest",
-			Entrypoint: "bash",
-			Args:       []string{"-c", `if [ ! -f "Dockerfile" ]; then gcloud alpha builds submit --pack image=` + imageURL + ` --region=us-central1 --quiet; else echo "Skipping Buildpacks"; fi`},
+			Args:       []string{"-c", `/kaniko/executor ` + strings.Join(kanikoArgs, " ")},
 		},
 		{
 			Name: "gcr.io/cloud-builders/gcloud",

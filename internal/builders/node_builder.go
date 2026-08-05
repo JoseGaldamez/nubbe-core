@@ -40,7 +40,6 @@ func (b *NodejsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 		port = "8080" // Default de Cloud Run
 	}
 
-	// 1. Identificadores y URLs para GCP
 	serviceName := strings.ToLower(config.SubDomain)
 	if len(serviceName) > 40 {
 		serviceName = serviceName[:40]
@@ -48,14 +47,65 @@ func (b *NodejsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 
 	imageURL := fmt.Sprintf("us-central1-docker.pkg.dev/%s/nubbe-repo/%s", b.projectID, serviceName)
 
-	// 2. Argumentos para Kaniko (Build con Caché)
+	var envBuilder strings.Builder
+	if len(config.EnvVars) > 0 {
+		for k, v := range config.EnvVars {
+			cleanVal := strings.ReplaceAll(v, "\"", "\\\"")
+			envBuilder.WriteString(fmt.Sprintf("ENV %s=\"%s\"\n", k, cleanVal))
+		}
+	}
+
+	nodeSetupScript := fmt.Sprintf(`
+echo "=== Preparando proyecto Node.js ==="
+
+if [ -f "Dockerfile" ]; then
+    echo "✅ Dockerfile detectado. Se usará tal cual."
+else
+    echo "⚠️ Dockerfile no encontrado. Generando Dockerfile para Node.js..."
+
+    cat << 'DOCKERFILE' > Dockerfile
+FROM node:20-alpine
+WORKDIR /app
+
+%s
+
+COPY package*.json pnpm-lock.yaml* yarn.lock* bun.lock* bun.lockb* ./
+
+RUN if [ -f pnpm-lock.yaml ]; then \
+      npm install -g pnpm && pnpm config set approve-builds true && pnpm install --no-frozen-lockfile; \
+    elif [ -f yarn.lock ]; then \
+      yarn install; \
+    elif [ -f bun.lock ] || [ -f bun.lockb ]; then \
+      npm install -g bun && bun install; \
+    else \
+      npm install; \
+    fi
+
+COPY . .
+
+ENV PORT=%s
+
+RUN if grep -q '"build":' package.json; then \
+      if [ -f pnpm-lock.yaml ]; then pnpm run build; \
+      elif [ -f yarn.lock ]; then yarn build; \
+      elif [ -f bun.lock ] || [ -f bun.lockb ]; then bun run build; \
+      else npm run build; fi; \
+    fi
+
+EXPOSE %s
+
+CMD ["sh", "-c", "if [ -f pnpm-lock.yaml ]; then %s; elif [ -f yarn.lock ]; then %s; elif [ -f bun.lock ] || [ -f bun.lockb ]; then %s; else %s; fi"]
+DOCKERFILE
+    echo "✅ Dockerfile generado para Node.js."
+fi
+`, envBuilder.String(), port, port, startCmd, startCmd, startCmd, startCmd)
+
 	kanikoArgs := []string{
 		"--destination=" + imageURL,
 		"--cache=true",
 		"--cache-ttl=168h",
 	}
 
-	// 3. Argumentos para Cloud Run (Deploy)
 	cloudRunArgs := []string{
 		"run", "deploy", serviceName,
 		"--image", imageURL,
@@ -73,7 +123,6 @@ func (b *NodejsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 		cloudRunArgs = append(cloudRunArgs, "--set-env-vars", strings.Join(runtimeVars, ","))
 	}
 
-	// 4. Orquestar el Job en Cloud Build
 	cbService, err := cloudbuild.NewService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fallo al inicializar servicio de cloudbuild: %w", err)
@@ -88,17 +137,12 @@ func (b *NodejsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 		{
 			Name:       "ubuntu",
 			Entrypoint: "bash",
-			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then echo "✅ Dockerfile detectado."; else echo "⚠️ Dockerfile no encontrado. Usando Buildpacks."; fi`},
+			Args:       []string{"-c", nodeSetupScript},
 		},
 		{
 			Name:       "gcr.io/kaniko-project/executor:debug",
 			Entrypoint: "/busybox/sh",
-			Args:       []string{"-c", `if [ -f "Dockerfile" ]; then /kaniko/executor ` + strings.Join(kanikoArgs, " ") + `; else echo "Skipping Kaniko"; fi`},
-		},
-		{
-			Name:       "gcr.io/google.com/cloudsdktool/cloud-sdk:latest",
-			Entrypoint: "bash",
-			Args:       []string{"-c", `if [ ! -f "Dockerfile" ]; then gcloud alpha builds submit --pack image=` + imageURL + ` --region=us-central1 --quiet; else echo "Skipping Buildpacks"; fi`},
+			Args:       []string{"-c", `/kaniko/executor ` + strings.Join(kanikoArgs, " ")},
 		},
 		{
 			Name: "gcr.io/cloud-builders/gcloud",
@@ -122,7 +166,6 @@ func (b *NodejsBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildR
 		Steps: steps,
 	}
 
-	// 5. Disparar el Build
 	resp, err := cbService.Projects.Builds.Create(b.projectID, buildObj).Do()
 	if err != nil {
 		return nil, fmt.Errorf("fallo al disparar cloudbuild (Node.js): %w", err)
