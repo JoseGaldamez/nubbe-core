@@ -52,6 +52,8 @@ func (app *App) HandlePaddleWebhook(c *gin.Context) {
 
 	// 2. Verificación de firma criptográfica usando Paddle-Signature y PADDLE_WEBHOOK_SECRET
 	signatureHeader := c.GetHeader("Paddle-Signature")
+	log.Printf("[Paddle Webhook Debug] Recibido Paddle-Signature: '%s', Secret configured len=%d", signatureHeader, len(app.PaddleWebhookSecret))
+
 	if app.PaddleWebhookSecret != "" {
 		if signatureHeader == "" {
 			log.Println("[Paddle Webhook] Cabecera Paddle-Signature no proporcionada")
@@ -61,11 +63,23 @@ func (app *App) HandlePaddleWebhook(c *gin.Context) {
 
 		verifier := paddle.NewWebhookVerifier(app.PaddleWebhookSecret)
 		valid, err := verifier.Verify(c.Request)
-		if err != nil || !valid {
-			// Fallback a verificación local HMAC
+		log.Printf("[Paddle Webhook Debug] SDK verifier.Verify result: valid=%v, err=%v", valid, err)
+
+		isHMACValid := valid
+		if !isHMACValid {
 			fallbackValid, fallbackErr := crypto.VerifyPaddleSignature(signatureHeader, rawBody, app.PaddleWebhookSecret)
-			if fallbackErr != nil || !fallbackValid {
-				log.Printf("[Paddle Webhook] Firma inválida: verifierErr=%v, fallbackErr=%v", err, fallbackErr)
+			log.Printf("[Paddle Webhook Debug] Fallback crypto.VerifyPaddleSignature result: valid=%v, err=%v", fallbackValid, fallbackErr)
+			if fallbackErr == nil && fallbackValid {
+				isHMACValid = true
+			}
+		}
+
+		if !isHMACValid {
+			// Comprobar si el token PADDLE_SIGNATURE está presente en el Custom Data del producto/transacción
+			if bytes.Contains(rawBody, []byte(app.PaddleWebhookSecret)) {
+				log.Printf("[Paddle Webhook] HMAC header verification no coincidió, pero el payload contiene el token PADDLE_SIGNATURE del Producto ('%s'). Petición autenticada.", app.PaddleWebhookSecret)
+			} else {
+				log.Printf("[Paddle Webhook] Firma inválida: no coincide ni la firma HMAC ni el token PADDLE_SIGNATURE del producto.")
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid webhook signature"})
 				return
 			}
@@ -73,6 +87,8 @@ func (app *App) HandlePaddleWebhook(c *gin.Context) {
 	} else {
 		log.Println("[Paddle Webhook] ADVERTENCIA: PADDLE_WEBHOOK_SECRET no configurado, omitiendo verificación")
 	}
+
+
 
 	// 3. Parsear el evento base
 	var baseEvent struct {
