@@ -9,6 +9,7 @@ import (
 	firebaseAuth "firebase.google.com/go/v4/auth"
 	"github.com/JoseGaldamez/nubbe-core/internal/middleware"
 	"github.com/JoseGaldamez/nubbe-core/internal/pkg/pubsub"
+	"github.com/JoseGaldamez/nubbe-core/internal/repository"
 	"github.com/JoseGaldamez/nubbe-core/internal/service"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -16,30 +17,40 @@ import (
 
 // App holds the dependencies for the application handlers.
 type App struct {
-	Firestore            *firestore.Client
-	Storage              *storage.Client
-	Auth                 *firebaseAuth.Client
-	ProjectService       *service.ProjectService
-	PubSub               *pubsub.Client
-	WG                   sync.WaitGroup
-	PaddleWebhookSecret  string
-	PaddleHobbyPriceID   string
-	PaddleProPriceID     string
-	PaddleEnvironment    string
+	Firestore                *firestore.Client
+	Storage                  *storage.Client
+	Auth                     *firebaseAuth.Client
+	ProjectService           *service.ProjectService
+	PubSub                   *pubsub.Client
+	PaymentRepo              repository.PaymentRepository
+	WG                       sync.WaitGroup
+	PaddleWebhookSecret      string
+	PaddleAPIKey             string
+	PaddleProductID          string
+	PaddlePriceHobbyMonthly  string
+	PaddlePriceProMonthly    string
+	PaddlePriceHobbyAnnually string
+	PaddlePriceProAnnually   string
+	PaddleEnvironment        string
 }
 
 // NewApp creates a new App instance with the provided dependencies.
-func NewApp(fs *firestore.Client, storage *storage.Client, auth *firebaseAuth.Client, projectService *service.ProjectService, pubsub *pubsub.Client, paddleWebhookSecret, paddleHobbyPriceID, paddleProPriceID, paddleEnvironment string) *App {
+func NewApp(fs *firestore.Client, storage *storage.Client, auth *firebaseAuth.Client, projectService *service.ProjectService, pubsub *pubsub.Client, paymentRepo repository.PaymentRepository, paddleWebhookSecret, paddleAPIKey, paddleProductID, paddlePriceHobbyMonthly, paddlePriceProMonthly, paddlePriceHobbyAnnually, paddlePriceProAnnually, paddleEnvironment string) *App {
 	return &App{
-		Firestore:            fs,
-		Storage:              storage,
-		Auth:                 auth,
-		ProjectService:       projectService,
-		PubSub:               pubsub,
-		PaddleWebhookSecret:  paddleWebhookSecret,
-		PaddleHobbyPriceID:   paddleHobbyPriceID,
-		PaddleProPriceID:     paddleProPriceID,
-		PaddleEnvironment:    paddleEnvironment,
+		Firestore:                fs,
+		Storage:                  storage,
+		Auth:                     auth,
+		ProjectService:           projectService,
+		PubSub:                   pubsub,
+		PaymentRepo:              paymentRepo,
+		PaddleWebhookSecret:      paddleWebhookSecret,
+		PaddleAPIKey:             paddleAPIKey,
+		PaddleProductID:          paddleProductID,
+		PaddlePriceHobbyMonthly:  paddlePriceHobbyMonthly,
+		PaddlePriceProMonthly:    paddlePriceProMonthly,
+		PaddlePriceHobbyAnnually: paddlePriceHobbyAnnually,
+		PaddlePriceProAnnually:   paddlePriceProAnnually,
+		PaddleEnvironment:        paddleEnvironment,
 	}
 }
 
@@ -81,7 +92,12 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 		// Environment Variables
 		api.GET("/projects/:projectId/env_vars", app.GetProjectEnvVars)
 		api.POST("/projects/:projectId/env_vars", app.SaveProjectEnvVars)
+
+		// Payments & Subscription Management
+		api.GET("/user/payments", app.GetUserPayments)
+		api.POST("/subscription/cancel", app.CancelUserSubscription)
 	}
+
 
 	// Grupo de rutas para Webhooks externos
 	webhooks := router.Group("/webhooks")

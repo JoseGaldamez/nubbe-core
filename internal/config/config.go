@@ -17,8 +17,12 @@ type Config struct {
 	GinMode                   string
 	AESEncryptionKey          string
 	PaddleWebhookSecret       string
-	PaddleHobbyPriceID        string
-	PaddleProPriceID          string
+	PaddleAPIKey              string
+	PaddleProductID           string
+	PaddlePriceHobbyMonthly   string
+	PaddlePriceProMonthly     string
+	PaddlePriceHobbyAnnually  string
+	PaddlePriceProAnnually    string
 	PaddleEnvironment         string
 }
 
@@ -36,10 +40,15 @@ func Load() (*Config, error) {
 		GinMode:                   os.Getenv("GIN_MODE"),
 		AESEncryptionKey:          os.Getenv("AES_ENCRYPTION_KEY"),
 		PaddleWebhookSecret:       os.Getenv("PADDLE_WEBHOOK_SECRET"),
-		PaddleHobbyPriceID:        os.Getenv("PADDLE_HOBBY_PRICE_ID"),
-		PaddleProPriceID:          os.Getenv("PADDLE_PRO_PRICE_ID"),
+		PaddleAPIKey:              os.Getenv("PADDLE_API_KEY"),
+		PaddleProductID:           os.Getenv("PADDLE_PRODUCT_ID"),
+		PaddlePriceHobbyMonthly:   os.Getenv("PADDLE_PRICE_HOBBY_MONTHLY"),
+		PaddlePriceProMonthly:     os.Getenv("PADDLE_PRICE_PRO_MONTHLY"),
+		PaddlePriceHobbyAnnually:  os.Getenv("PADDLE_PRICE_HOBBY_ANNUALLY"),
+		PaddlePriceProAnnually:   os.Getenv("PADDLE_PRICE_PRO_ANNUALLY"),
 		PaddleEnvironment:         os.Getenv("PADDLE_ENVIRONMENT"),
 	}
+
 
 	if cfg.Port == "" {
 		cfg.Port = "8080"
