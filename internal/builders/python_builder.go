@@ -184,7 +184,7 @@ fi
 		{
 			Name:       "gcr.io/google.com/cloudsdktool/cloud-sdk:latest",
 			Entrypoint: "bash",
-			Args:       []string{"-c", `if [ ! -f "Dockerfile" ]; then gcloud alpha builds submit --pack image=` + imageURL + ` --location=us-central1 --quiet; else echo "Skipping Buildpacks"; fi`},
+			Args:       []string{"-c", `if [ ! -f "Dockerfile" ]; then gcloud alpha builds submit --pack image=` + imageURL + ` --region=us-central1 --quiet; else echo "Skipping Buildpacks"; fi`},
 		},
 		{
 			Name: "gcr.io/cloud-builders/gcloud",
