@@ -192,12 +192,14 @@ if [ -f "bun.lockb" ]; then
 elif [ -f "pnpm-lock.yaml" ]; then
     echo "pnpm detectado (pnpm-lock.yaml). Activando corepack..."
     corepack enable pnpm
-    # pnpm v10+ requiere aprobación de scripts de compilación de dependencias en CI
-    if pnpm install --dangerously-allow-all-builds; then
+    pnpm config set minimum-release-age 0 2>/dev/null || true
+    if pnpm install --dangerously-allow-all-builds --config.minimum-release-age=0 --no-frozen-lockfile; then
         echo "Dependencias de pnpm instaladas con éxito."
+    elif pnpm install --no-frozen-lockfile; then
+        echo "Dependencias de pnpm instaladas con --no-frozen-lockfile."
     else
         echo "Reintentando pnpm install estándar..."
-        pnpm install
+        pnpm install --no-frozen-lockfile
     fi
     pnpm run build
 
@@ -210,12 +212,13 @@ elif [ -f "yarn.lock" ]; then
 else
     echo "NPM detectado por defecto."
     if [ -f "package-lock.json" ]; then
-        npm ci
+        npm ci || npm install
     else
         npm install
     fi
     npm run build
 fi
+
 `
 }
 

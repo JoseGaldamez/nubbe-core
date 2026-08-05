@@ -55,11 +55,13 @@ func (b *ReactBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildRe
 	reactBuildScript := PackageManagerDetectionScript() + fmt.Sprintf(`
 echo "=== Configurando Enrutamiento SPA ==="
 # Vital para que funcione React Router en Cloudflare Pages
+mkdir -p %s
 echo "/* /index.html 200" > %s/_redirects
 
 echo "=== Desplegando a la red Edge ==="
 npx --yes wrangler pages deploy %s --project-name $_SUB_DOMAIN --branch $_BRANCH
-`, buildDir, buildDir)
+`, buildDir, buildDir, buildDir)
+
 
 	// 5. Orquestar el Job en Cloud Build
 	cbService, err := cloudbuild.NewService(ctx)

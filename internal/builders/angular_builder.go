@@ -76,7 +76,9 @@ if [ -z "$$BUILD_DIR" ]; then
 fi
 
 echo "=== Configurando Enrutamiento SPA para Angular Router ==="
+mkdir -p $$BUILD_DIR
 echo "/* /index.html 200" > $$BUILD_DIR/_redirects
+
 
 echo "=== Desplegando Angular a la red Edge ==="
 npx --yes wrangler pages deploy $$BUILD_DIR --project-name $_SUB_DOMAIN --branch $_BRANCH

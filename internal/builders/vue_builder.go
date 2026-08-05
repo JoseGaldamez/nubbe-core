@@ -51,11 +51,13 @@ func (b *VueBuilder) Deploy(ctx context.Context, config BuildConfig) (*BuildResu
 	// Script: detectar gestor de paquetes, compilar, inyectar SPA redirect y desplegar
 	vueBuildScript := PackageManagerDetectionScript() + fmt.Sprintf(`
 echo "=== Configurando Enrutamiento SPA para Vue Router ==="
+mkdir -p %s
 echo "/* /index.html 200" > %s/_redirects
 
 echo "=== Desplegando Vue a la red Edge ==="
 npx --yes wrangler pages deploy %s --project-name $_SUB_DOMAIN --branch $_BRANCH
-`, buildDir, buildDir)
+`, buildDir, buildDir, buildDir)
+
 
 	cbService, err := cloudbuild.NewService(ctx)
 	if err != nil {
