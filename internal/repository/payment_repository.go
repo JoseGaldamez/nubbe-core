@@ -31,6 +31,7 @@ type UserSubscription struct {
 	PaddleCustomerID     string `firestore:"paddleCustomerId" json:"paddleCustomerId"`
 	PaddleSubscriptionID string `firestore:"paddleSubscriptionId" json:"paddleSubscriptionId"`
 	PaddleTransactionID  string `firestore:"paddleTransactionId" json:"paddleTransactionId"`
+	CurrentPeriodStartsAt string `firestore:"currentPeriodStartsAt,omitempty" json:"currentPeriodStartsAt,omitempty"`
 	CurrentPeriodEnd     string `firestore:"currentPeriodEnd" json:"currentPeriodEnd"`
 	CancelAtPeriodEnd    bool   `firestore:"cancelAtPeriodEnd" json:"cancelAtPeriodEnd"`
 }
@@ -44,6 +45,8 @@ type TransactionRecord struct {
 	Status            string    `firestore:"status" json:"status"`
 	PaddleCustomerID  string    `firestore:"paddleCustomerId" json:"paddleCustomerId"`
 	PaddleSubID       string    `firestore:"paddleSubscriptionId" json:"paddleSubscriptionId"`
+	ReceiptURL        string    `firestore:"receiptUrl,omitempty" json:"receiptUrl,omitempty"`
+	InvoicePDF        string    `firestore:"invoicePdf,omitempty" json:"invoicePdf,omitempty"`
 	ProcessedAt       time.Time `firestore:"processedAt" json:"processedAt"`
 }
 

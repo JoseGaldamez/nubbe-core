@@ -96,6 +96,9 @@ func (app *App) InitRouter(webhookAudience, saEmail, jobsAudience string) *gin.E
 		// Payments & Subscription Management
 		api.GET("/user/payments", app.GetUserPayments)
 		api.POST("/subscription/cancel", app.CancelUserSubscription)
+		api.POST("/subscription/resume", app.ResumeUserSubscription)
+		api.GET("/subscription/portal", app.GetCustomerPortalURL)
+		api.GET("/subscription/sync", app.SyncUserSubscription)
 	}
 
 

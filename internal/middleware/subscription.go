@@ -80,6 +80,15 @@ func SubscriptionLimitMiddlewareExt(retriever SubscriptionRetriever) gin.Handler
 
 		// 1. Obtener la suscripción del usuario desde Firestore
 		subscription, err := retriever.GetSubscription(ctx, userID)
+		if err == nil && strings.EqualFold(subscription.Status, "past_due") {
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":   "Pago en mora (Past Due)",
+				"details": "Tu último cobro recurrente ha fallado. Por favor, actualiza tu método de pago para continuar utilizando el servicio.",
+			})
+			c.Abort()
+			return
+		}
+
 		var planID string = "free" // Default
 		if err == nil {
 			if subscription.PlanIDCamel != "" {

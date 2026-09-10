@@ -20,6 +20,12 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+// BillingPeriodPayload representa el objeto billing_period enviado por Paddle.
+type BillingPeriodPayload struct {
+	StartsAt string `json:"starts_at"`
+	EndsAt   string `json:"ends_at"`
+}
+
 // TransactionCompletedData representa los datos payload del evento transaction.completed de Paddle Billing.
 type TransactionCompletedData struct {
 	ID             string                 `json:"id"`
@@ -27,7 +33,12 @@ type TransactionCompletedData struct {
 	CustomerID     *string                `json:"customer_id"`
 	SubscriptionID *string                `json:"subscription_id"`
 	CustomData     map[string]interface{} `json:"custom_data"`
-	Items          []struct {
+	BillingPeriod  *BillingPeriodPayload  `json:"billing_period"`
+	ReceiptURL     *string                `json:"receipt_url"`
+	Details        *struct {
+		ReceiptURL *string `json:"receipt_url"`
+	} `json:"details"`
+	Items []struct {
 		PriceID string `json:"price_id"`
 		Price   struct {
 			ID string `json:"id"`
@@ -96,10 +107,12 @@ func (app *App) HandlePaddleWebhook(c *gin.Context) {
 	log.Printf("[Paddle Webhook] Evento recibido: %s (ID: %s)", baseEvent.EventType, baseEvent.EventID)
 
 	// 4. Manejo de Eventos según su tipo
-	switch baseEvent.EventType {
-	case paddle.EventTypeNameTransactionCompleted:
+	switch string(baseEvent.EventType) {
+	case string(paddle.EventTypeNameTransactionCompleted):
 		app.handleTransactionCompleted(c, baseEvent.EventID, baseEvent.Data)
-	case paddle.EventTypeNameSubscriptionCreated, paddle.EventTypeNameSubscriptionUpdated, paddle.EventTypeNameSubscriptionCanceled:
+	case "transaction.payment_failed":
+		app.handlePaymentFailed(c, baseEvent.EventID, baseEvent.Data)
+	case string(paddle.EventTypeNameSubscriptionCreated), string(paddle.EventTypeNameSubscriptionUpdated), string(paddle.EventTypeNameSubscriptionCanceled), "subscription.past_due":
 		app.handleSubscriptionEventLegacy(c, baseEvent.EventID, string(baseEvent.EventType), baseEvent.Data)
 	default:
 		log.Printf("[Paddle Webhook] Evento '%s' no requiere acción", baseEvent.EventType)
@@ -172,6 +185,24 @@ func (app *App) handleTransactionCompleted(c *gin.Context, eventID string, dataR
 		}
 	}
 
+	// Extraer fecha de fin de período y URL del recibo desde el payload de Paddle
+	currentPeriodEnd := ""
+	currentPeriodStartsAt := ""
+	if data.BillingPeriod != nil && data.BillingPeriod.EndsAt != "" {
+		currentPeriodEnd = data.BillingPeriod.EndsAt
+		currentPeriodStartsAt = data.BillingPeriod.StartsAt
+	} else {
+		// Fallback en caso de no venir especificado en la transacción
+		currentPeriodEnd = time.Now().AddDate(0, 1, 0).Format(time.RFC3339)
+	}
+
+	receiptURL := ""
+	if data.ReceiptURL != nil && *data.ReceiptURL != "" {
+		receiptURL = *data.ReceiptURL
+	} else if data.Details != nil && data.Details.ReceiptURL != nil {
+		receiptURL = *data.Details.ReceiptURL
+	}
+
 	// Preparar modelos para repositorio
 	txRecord := repository.TransactionRecord{
 		EventID:           eventID,
@@ -182,19 +213,21 @@ func (app *App) handleTransactionCompleted(c *gin.Context, eventID string, dataR
 		Status:            data.Status,
 		PaddleCustomerID:  customerID,
 		PaddleSubID:       subscriptionID,
+		ReceiptURL:        receiptURL,
 		ProcessedAt:       time.Now(),
 	}
 
 	subData := repository.UserSubscription{
-		PlanID:               planID,
-		PlanIDSnake:          planID,
-		Level:                subLevel,
-		Status:               "active",
-		PaddleCustomerID:     customerID,
-		PaddleSubscriptionID: subscriptionID,
-		PaddleTransactionID:  data.ID,
-		CurrentPeriodEnd:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339),
-		CancelAtPeriodEnd:    false,
+		PlanID:                planID,
+		PlanIDSnake:           planID,
+		Level:                 subLevel,
+		Status:                "active",
+		PaddleCustomerID:      customerID,
+		PaddleSubscriptionID:  subscriptionID,
+		PaddleTransactionID:   data.ID,
+		CurrentPeriodStartsAt: currentPeriodStartsAt,
+		CurrentPeriodEnd:      currentPeriodEnd,
+		CancelAtPeriodEnd:     false,
 	}
 
 	// Actualizar en base de datos de manera idempotente
@@ -211,6 +244,45 @@ func (app *App) handleTransactionCompleted(c *gin.Context, eventID string, dataR
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "transaction_id": data.ID})
 }
 
+// handlePaymentFailed maneja los eventos transaction.payment_failed y marca el estado del usuario como past_due.
+func (app *App) handlePaymentFailed(c *gin.Context, eventID string, dataRaw json.RawMessage) {
+	var data struct {
+		ID             string                 `json:"id"`
+		CustomerID     *string                `json:"customer_id"`
+		SubscriptionID *string                `json:"subscription_id"`
+		CustomData     map[string]interface{} `json:"custom_data"`
+	}
+
+	if err := json.Unmarshal(dataRaw, &data); err != nil {
+		log.Printf("[Paddle Webhook] Error parseando payload de transacción fallida: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payment_failed payload"})
+		return
+	}
+
+	userID := extractUserID(data.CustomData)
+	if userID == "" {
+		log.Printf("[Paddle Webhook] Transacción fallida %s ignorada: no hay user_id en custom_data", data.ID)
+		c.JSON(http.StatusOK, gin.H{"status": "ignored", "reason": "No user_id in custom_data"})
+		return
+	}
+
+	log.Printf("[Paddle Webhook] Cobro fallido detectado para usuario %s (tx: %s). Actualizando estado a past_due.", userID, data.ID)
+
+	updates := []firestore.Update{
+		{Path: "subscription.status", Value: "past_due"},
+		{Path: "updatedAt", Value: time.Now().Format(time.RFC3339)},
+	}
+
+	userRef := app.Firestore.Collection("users").Doc(userID)
+	if _, err := userRef.Update(c.Request.Context(), updates); err != nil {
+		log.Printf("[Paddle Webhook] Error actualizando estado past_due para usuario %s: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database update failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": "Subscription status marked as past_due"})
+}
+
 // handleSubscriptionEventLegacy maneja los eventos de ciclo de vida de la suscripción.
 func (app *App) handleSubscriptionEventLegacy(c *gin.Context, eventID, eventType string, dataRaw json.RawMessage) {
 	ctx := c.Request.Context()
@@ -220,8 +292,17 @@ func (app *App) handleSubscriptionEventLegacy(c *gin.Context, eventID, eventType
 		Status     string                 `json:"status"`
 		CustomerID string                 `json:"customer_id"`
 		CustomData map[string]interface{} `json:"custom_data"`
-		Items      []struct {
-			Price struct {
+		CurrentPeriod *struct {
+			StartsAt string `json:"starts_at"`
+			EndsAt   string `json:"ends_at"`
+		} `json:"current_period"`
+		ScheduledChange *struct {
+			Action      string `json:"action"`
+			EffectiveAt string `json:"effective_at"`
+		} `json:"scheduled_change"`
+		Items []struct {
+			PriceID string `json:"price_id"`
+			Price   struct {
 				ID string `json:"id"`
 			} `json:"price"`
 		} `json:"items"`
@@ -241,18 +322,40 @@ func (app *App) handleSubscriptionEventLegacy(c *gin.Context, eventID, eventType
 
 	priceID := ""
 	if len(data.Items) > 0 {
-		priceID = data.Items[0].Price.ID
+		if data.Items[0].PriceID != "" {
+			priceID = data.Items[0].PriceID
+		} else {
+			priceID = data.Items[0].Price.ID
+		}
 	}
+
+	// Al recibir subscription.updated, el price_id tiene prioridad sobre custom_data para aplicar upgrades de plan al instante
+	resolvedLevel := app.resolveSubscriptionLevelFromPriceID(priceID)
 	subLevel := extractSubscriptionLevel(data.CustomData)
-	if subLevel == "" {
-		subLevel = app.resolveSubscriptionLevelFromPriceID(priceID)
+
+	if resolvedLevel != "free" || subLevel == "" {
+		subLevel = resolvedLevel
 	}
+
 	planID, limits := resolvePlanAndLimits(subLevel)
 
 	if eventType == "subscription.canceled" || data.Status == "canceled" {
 		planID, limits = resolvePlanAndLimits("free")
 		subLevel = "free"
 	}
+
+	periodEnd := data.NextBilledAt
+	if data.CurrentPeriod != nil && data.CurrentPeriod.EndsAt != "" {
+		periodEnd = data.CurrentPeriod.EndsAt
+	}
+
+	cancelAtPeriodEnd := false
+	if data.ScheduledChange != nil && strings.ToLower(data.ScheduledChange.Action) == "cancel" {
+		cancelAtPeriodEnd = true
+	}
+
+	log.Printf("[Paddle Webhook] Suscripción %s (%s): user=%s, plan=%s, level=%s, priceID=%s, status=%s, cancelAtPeriodEnd=%v",
+		data.ID, eventType, userID, planID, subLevel, priceID, data.Status, cancelAtPeriodEnd)
 
 	updates := []firestore.Update{
 		{Path: "subscription.plan_id", Value: planID},
@@ -263,7 +366,8 @@ func (app *App) handleSubscriptionEventLegacy(c *gin.Context, eventID, eventType
 		{Path: "subscription.paddle_customer_id", Value: data.CustomerID},
 		{Path: "subscription.paddleSubscriptionId", Value: data.ID},
 		{Path: "subscription.paddle_subscription_id", Value: data.ID},
-		{Path: "subscription.currentPeriodEnd", Value: data.NextBilledAt},
+		{Path: "subscription.currentPeriodEnd", Value: periodEnd},
+		{Path: "subscription.cancelAtPeriodEnd", Value: cancelAtPeriodEnd},
 		{Path: "limits.maxProjects", Value: limits.MaxProjects},
 		{Path: "limits.maxBandwidthGB", Value: limits.MaxBandwidthGB},
 		{Path: "limits.buildMinutesLimit", Value: limits.BuildMinutesLimit},
@@ -284,7 +388,7 @@ func (app *App) handleSubscriptionEventLegacy(c *gin.Context, eventID, eventType
 		go app.handleDowngrade(userID)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "plan_id": planID, "level": subLevel})
 }
 
 // extractUserID extrae el ID de usuario desde los metadatos de custom_data.

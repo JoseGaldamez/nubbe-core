@@ -106,6 +106,13 @@ func TestSubscriptionLimitMiddleware(t *testing.T) {
 			mockCountErr:   errors.New("failed to query projects"),
 			expectedStatus: http.StatusInternalServerError,
 		},
+		{
+			name:           "user in past_due status - payment required",
+			userID:         "user-10",
+			mockSub:        Subscription{PlanID: "pro", Status: "past_due"},
+			mockCount:      1,
+			expectedStatus: http.StatusPaymentRequired,
+		},
 	}
 
 	for _, tt := range tests {
